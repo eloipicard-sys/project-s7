@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PLC — DB{{ test_db }}</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html, body {
+            width: 100vw; height: 100vh;
+            overflow: hidden;
+            font-family: "Segoe UI", system-ui, sans-serif;
+            background: #f0f0f0;
+            color: #1a1a1a;
+            font-size: 13px;
+        }
+
+        .page {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding: 6px;
+            gap: 5px;
+        }
+
+        /* ── Header ── */
+        .hdr {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 8px;
+            background: #1a1a1a;
+            color: #fff;
+            flex-shrink: 0;
+        }
+        .hdr-title { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+        .hdr-right { display: flex; align-items: center; gap: 12px; font-size: 0.68rem; color: #aaa; }
+        .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
+        .dot.ok  { background:#4caf50; }
+        .dot.err { background:#f44336; }
+
+        /* ── Top row: V1 + Counter ── */
+        .row-top {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
+            flex-shrink: 0;
+        }
+
+        /* ── Bottom grid: V2–V9 ── */
+        .row-int {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            gap: 5px;
+            flex: 1;
+            min-height: 0;
+        }
+
+        /* ── Cards ── */
+        .card {
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 7px 9px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .card.ro { background: #f8f8f8; border-color: #ccc; }
+
+        .c-label {
+            font-size: 0.6rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: #aaa;
+            line-height: 1;
+        }
+        .c-val {
+            font-size: 1.6rem;
+            font-weight: 200;
+            line-height: 1;
+            letter-spacing: -0.01em;
+            font-variant-numeric: tabular-nums;
+        }
+        .c-val.muted { color: #999; }
+
+        .bool-led {
+            display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+            background: #ddd; margin-right: 6px; vertical-align: middle; transition: background 0.2s;
+        }
+        .bool-led.on { background: #1a1a1a; }
+
+        /* ── Card control area ── */
+        .c-ctrl {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        /* ── Toggle button (V1 BOOL) ── */
+        .btn {
+            height: 36px;
+            padding: 0 10px;
+            background: #1a1a1a; color: #fff; border: none;
+            font-family: inherit; font-size: 0.65rem;
+            letter-spacing: 0.05em; text-transform: uppercase; cursor: pointer;
+            flex-shrink: 0;
+            touch-action: manipulation;
+        }
+        .btn:hover { background: #333; }
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+
+        /* ── Arrow buttons (V2–V9 INT) ── */
+        .arr-btn {
+            flex: 1;
+            height: 40px;
+            background: #1a1a1a;
+            color: #fff;
+            border: none;
+            font-size: 1.2rem;
+            font-weight: 700;
+            cursor: pointer;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .arr-btn:active { background: #444; }
+        .arr-btn:disabled { background: #ccc; cursor: not-allowed; }
+
+        .fb {
+            font-size: 0.58rem; color: #888; min-height: 10px; line-height: 1.2;
+        }
+        .fb.ok  { color: #2a7a2a; }
+        .fb.err { color: #c00; }
+
+        /* ── Nav ── */
+        .nav-bar { display: flex; gap: 3px; }
+        .nav-a {
+            padding: 2px 10px;
+            font-family: inherit; font-size: 0.6rem;
+            letter-spacing: 0.07em; text-transform: uppercase;
+            border: 1px solid #444; color: #888;
+            text-decoration: none; cursor: pointer;
+        }
+        .nav-a:hover { border-color: #aaa; color: #ccc; }
+        .nav-a.active { background: #fff; color: #1a1a1a; border-color: #fff; }
+        .nav-a.api { color: #555; border-color: #333; font-size: 0.55rem; }
+        .nav-a.api:hover { color: #888; }
+    </style>
+</head>
+<body>
+<div class="page">
+
+    <!-- Header -->
+    <div class="hdr">
+        <span class="hdr-title">PLC · DB{{ test_db }}</span>
+        <div class="hdr-right">
+            <nav class="nav-bar">
+                <a href="/" class="nav-a">Monitor</a>
+                <a href="/test" class="nav-a active">Test DB</a>
+                <a href="/api/test/read" class="nav-a api" target="_blank">JSON</a>
+            </nav>
+            <span>
+                <span class="dot" id="plcDot"></span>
+                <span id="plcStatus">--</span> · {{ plc_ip }}
+            </span>
+        </div>
+    </div>
+
+    <!-- V1 + Counter -->
+    <div class="row-top">
+        <div class="card">
+            <div class="c-label">V1 · BOOL · DBX0.0</div>
+            <div style="display:flex; align-items:center; justify-content:center; gap:16px; flex:1;">
+                <div class="c-val">
+                    <span class="bool-led" id="v1Led"></span>
+                    <span id="v1Val">--</span>
+                </div>
+                <div style="display:flex; flex-direction:column; align-items:center; gap:3px;">
+                    <button class="btn" onclick="toggleV1()" {% if not connected %}disabled{% endif %}>Toggle</button>
+                    <span class="fb" id="fb_V1"></span>
+                </div>
+            </div>
+        </div>
+        <div class="card ro">
+            <div class="c-label">Counter · INT · DBW18 · read-only</div>
+            <div class="c-val muted" id="counterVal">--</div>
+            <div class="fb">Incremented by PLC</div>
+        </div>
+    </div>
+
+    <!-- V2–V9 -->
+    <div class="row-int" id="intGrid"></div>
+
+</div>
+
+<script>
+let lastV1 = null;
+const INT_VARS   = ['V2','V3','V4','V5','V6','V7','V8','V9'];
+const OFFSETS    = {V2:2, V3:4, V4:6, V5:8, V6:10, V7:12, V8:14, V9:16};
+const DISABLED   = {{ 'true' if not connected else 'false' }};
+const INT_VALUES = {V2:0, V3:0, V4:0, V5:0, V6:0, V7:0, V8:0, V9:0};
+
+// Build INT cards with < > arrow buttons
+(function buildIntCards() {
+    const grid = document.getElementById('intGrid');
+    INT_VARS.forEach(name => {
+        const off = OFFSETS[name];
+        const dis = DISABLED ? 'disabled' : '';
+        grid.innerHTML += `
+        <div class="card">
+            <div class="c-label">${name} · INT · DBW${off}</div>
+            <div class="c-val" id="val_${name}">--</div>
+            <div class="c-ctrl">
+                <button class="arr-btn"
+                        onpointerdown="startRepeat('${name}', -1)"
+                        onpointerup="stopRepeat()"
+                        onpointercancel="stopRepeat()"
+                        onpointerleave="stopRepeat()" ${dis}>&lt;</button>
+                <button class="arr-btn"
+                        onpointerdown="startRepeat('${name}', 1)"
+                        onpointerup="stopRepeat()"
+                        onpointercancel="stopRepeat()"
+                        onpointerleave="stopRepeat()" ${dis}>&gt;</button>
+            </div>
+            <div class="fb" id="fb_${name}"></div>
+        </div>`;
+    });
+})();
+
+// ── Feedback helper ───────────────────────────────────
+function setFb(id, msg, ok) {
+    const el = document.getElementById('fb_' + id);
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'fb ' + (ok ? 'ok' : 'err');
+    setTimeout(() => { el.textContent = ''; el.className = 'fb'; }, 2500);
+}
+
+// ── Auto-repeat with progressive speed ───────────────
+let _repeatTimer = null;
+let _writeTimer  = null;
+let _pressStart  = null;
+
+function startRepeat(name, delta) {
+    _pressStart = Date.now();
+    adjustInt(name, delta);
+    _repeatTimer = setInterval(() => adjustInt(name, delta), 200);
+}
+
+function stopRepeat() {
+    clearInterval(_repeatTimer);
+    _repeatTimer = null;
+    _pressStart  = null;
+}
+
+function adjustInt(name, baseDelta) {
+    // Progressive speed: 1× → 5× after 0.6s → 50× after 1.5s
+    const elapsed = _pressStart ? Date.now() - _pressStart : 0;
+    const mult  = elapsed > 1500 ? 50 : elapsed > 600 ? 5 : 1;
+    const delta = baseDelta * mult;
+    const next  = Math.max(-32768, Math.min(32767, (INT_VALUES[name] || 0) + delta));
+    INT_VALUES[name] = next;
+    const el = document.getElementById('val_' + name);
+    if (el) el.textContent = next;
+    // Debounce write: send 300 ms after last adjustment
+    clearTimeout(_writeTimer);
+    _writeTimer = setTimeout(() => writeIntVal(name, next), 300);
+}
+
+function writeIntVal(name, val) {
+    fetch('/api/test/write', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({variable: name, value: val})
+    })
+    .then(r => r.json())
+    .then(d => { setFb(name, d.ok ? name + '→' + val : (d.error || 'ERR'), d.ok); })
+    .catch(() => setFb(name, 'ERR', false));
+}
+
+// ── Poll PLC state ────────────────────────────────────
+function refreshRead() {
+    fetch('/api/test/read')
+        .then(r => r.json())
+        .then(d => {
+            const na = !d.connected;
+            document.getElementById('v1Val').textContent = na ? 'N/A' : (d.V1 ? 'TRUE' : 'FALSE');
+            document.getElementById('v1Led').className = 'bool-led ' + (!na && d.V1 ? 'on' : '');
+            document.getElementById('counterVal').textContent = na ? 'N/A' : d.counter;
+            lastV1 = na ? null : d.V1;
+            INT_VARS.forEach(n => {
+                const el = document.getElementById('val_' + n);
+                const v  = na ? null : (d[n] !== undefined ? d[n] : null);
+                // Sync local tracker only when not actively pressing
+                if (v !== null && !_repeatTimer) INT_VALUES[n] = v;
+                if (el) el.textContent = na ? 'N/A' : (v !== null ? v : '--');
+            });
+            const ok = d.connected === true;
+            document.getElementById('plcDot').className = 'dot ' + (ok ? 'ok' : 'err');
+            document.getElementById('plcStatus').textContent = ok ? 'Connected' : 'Disconnected';
+        })
+        .catch(() => {
+            document.getElementById('plcDot').className = 'dot err';
+            document.getElementById('plcStatus').textContent = 'ERR';
+        });
+}
+
+// ── V1 BOOL toggle ────────────────────────────────────
+function toggleV1() {
+    const newVal = !(lastV1 === true);
+    fetch('/api/test/write', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({variable: 'V1', value: newVal})
+    })
+    .then(r => r.json())
+    .then(d => {
+        setFb('V1', d.ok ? 'V1→' + (newVal ? 'T' : 'F') : (d.error || 'ERR'), d.ok);
+        refreshRead();
+    })
+    .catch(() => setFb('V1', 'ERR', false));
+}
+
+refreshRead();
+setInterval(refreshRead, 1000);
+</script>
+</body>
+</html>

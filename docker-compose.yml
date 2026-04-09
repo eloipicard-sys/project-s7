@@ -1,0 +1,25 @@
+# ============================================================
+# docker-compose.yml — Test Docker | Projet S7-1500
+# ============================================================
+
+services:
+  app:
+    build: .
+    container_name: s7-thermal-app
+    ports:
+      - "5000:5000"          # Accès web : http://localhost:5000
+    environment:
+      - PLC_IP=${PLC_IP:-192.168.0.1}      # IP du S7-1500 (depuis .env)
+      - PLC_RACK=${PLC_RACK:-0}
+      - PLC_SLOT=${PLC_SLOT:-1}
+      - FLASK_DEBUG=${FLASK_DEBUG:-1}
+    volumes:
+      - ./app:/app           # Hot-reload: code changes visible without rebuild
+      - ./logs:/app/logs     # Persistent CSV logs (survives container restart)
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

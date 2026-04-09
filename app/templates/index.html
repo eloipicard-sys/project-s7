@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thermal Process Monitor — S7-1500</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: "Segoe UI", system-ui, sans-serif;
+            background: #f5f5f5;
+            color: #1a1a1a;
+            padding: 28px 40px;
+            min-height: 100vh;
+        }
+
+        /* ── Header ── */
+        header { border-bottom: 2px solid #1a1a1a; padding-bottom: 12px; margin-bottom: 20px; }
+        header h1 { font-size: 1.2rem; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; }
+        header p  { font-size: 0.78rem; color: #666; margin-top: 4px; letter-spacing: 0.05em; }
+
+        /* ── Alarm banner ── */
+        .alarm-banner {
+            display: none; align-items: center; gap: 14px;
+            padding: 10px 16px; margin-bottom: 14px;
+            font-size: 0.82rem; letter-spacing: 0.04em;
+        }
+        .alarm-banner.active { display: flex; }
+        .alarm-banner.lvl-HH { background:#7a0000; color:#fff; }
+        .alarm-banner.lvl-H  { background:#c00;    color:#fff; }
+        .alarm-banner.lvl-L  { background:#0066cc; color:#fff; }
+        .alarm-banner.lvl-LL { background:#003d80; color:#fff; }
+        .alarm-banner .a-icon { font-size:1.1rem; font-weight:700; flex-shrink:0; }
+        .alarm-banner .a-msg  { flex:1; }
+        .alarm-banner .a-ack {
+            background:rgba(255,255,255,.2); border:1px solid rgba(255,255,255,.4);
+            color:#fff; font-family:inherit; font-size:0.65rem;
+            letter-spacing:.07em; text-transform:uppercase; padding:3px 12px; cursor:pointer;
+        }
+        .alarm-banner .a-ack:hover { background:rgba(255,255,255,.35); }
+
+        /* ── Layout ── */
+        .layout { display: grid; grid-template-columns: 1fr 420px; gap: 24px; align-items: start; }
+
+        /* ── Panel ── */
+        .panel { background:#fff; border:1px solid #ddd; padding:20px; margin-bottom:14px; }
+        .panel-title {
+            font-size:0.62rem; letter-spacing:.12em; text-transform:uppercase;
+            color:#999; margin-bottom:14px;
+        }
+
+        /* ── Navbar ── */
+        .navbar { display:flex; gap:4px; align-items:center; margin-bottom:18px; }
+        .nav-btn {
+            padding:5px 14px; font-family:inherit; font-size:0.65rem;
+            letter-spacing:.08em; text-transform:uppercase; border:1px solid #ddd;
+            background:#fff; color:#888; cursor:pointer; text-decoration:none; display:inline-block;
+        }
+        .nav-btn:hover { border-color:#1a1a1a; color:#1a1a1a; }
+        .nav-btn.active { background:#1a1a1a; color:#fff; border-color:#1a1a1a; }
+        .nav-sep { border-left:1px solid #ddd; margin:0 6px; height:18px; }
+        .nav-btn.api { color:#bbb; font-size:0.6rem; }
+        .nav-btn.api:hover { color:#555; border-color:#999; }
+        .conn-indicator {
+            margin-left:auto; font-size:0.6rem; letter-spacing:.08em;
+            text-transform:uppercase; padding:2px 8px; border:1px solid;
+            font-family:inherit;
+        }
+        .conn-live    { color:#2a7a2a; border-color:#2a7a2a; }
+        .conn-polling { color:#c47200; border-color:#c47200; }
+        .conn-err     { color:#c00;    border-color:#c00;    }
+
+        /* ── Source badge ── */
+        .sim-badge {
+            display:inline-block; font-size:0.62rem; letter-spacing:.08em;
+            text-transform:uppercase; border:1px solid #ddd; color:#aaa;
+            padding:2px 8px; margin-bottom:14px; transition:color .3s,border-color .3s;
+        }
+        .sim-badge.src-sim { border-color:#c47200; color:#c47200; }
+        .sim-badge.src-plc { border-color:#2a7a2a; color:#2a7a2a; }
+
+        /* ── P&ID SVG ── */
+        .pid-svg-wrap { width:100%; overflow:hidden; }
+        .pid-svg-wrap svg { width:100%; height:auto; display:block; }
+
+        /* Pipe flow animation */
+        .flow-anim {
+            stroke-dasharray:10 7;
+            animation:flow-move .9s linear infinite;
+        }
+        @keyframes flow-move { to { stroke-dashoffset:-17; } }
+
+        /* ── Process cards ── */
+        .cards-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
+        .card { background:#fff; border:1px solid #ddd; padding:16px; }
+        .card .c-label { font-size:0.62rem; letter-spacing:.1em; text-transform:uppercase; color:#aaa; margin-bottom:6px; }
+        .card .c-value { font-size:1.8rem; font-weight:300; line-height:1; }
+        .card .c-unit  { font-size:0.78rem; color:#777; margin-top:4px; }
+        .card .c-sp    { font-size:0.68rem; color:#bbb; margin-top:7px; border-top:1px solid #f0f0f0; padding-top:6px; }
+        .valve-open    { color:#2a7a2a !important; font-weight:500; }
+        .valve-partial { color:#c47200 !important; font-weight:500; }
+        .valve-closed  { color:#c00    !important; font-weight:500; }
+        .valve-dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:7px; vertical-align:middle; }
+        .valve-dot.open    { background:#2a7a2a; }
+        .valve-dot.partial { background:#c47200; }
+        .valve-dot.closed  { background:#c00; }
+
+        /* ── Setpoint controls ── */
+        .sp-field { margin-bottom:12px; }
+        .sp-label { font-size:0.62rem; letter-spacing:.08em; text-transform:uppercase; color:#888; margin-bottom:5px; }
+        .sp-hint  { color:#ccc; letter-spacing:0; text-transform:none; font-size:0.58rem; }
+        .arrow-ctrl { display:flex; align-items:stretch; height:58px; border:1px solid #ccc; }
+        .arrow-btn {
+            width:72px; background:#1a1a1a; color:#fff; border:none;
+            font-size:1.4rem; font-weight:700; cursor:pointer; flex-shrink:0;
+            touch-action:manipulation; user-select:none;
+            display:flex; align-items:center; justify-content:center;
+        }
+        .arrow-btn:active { background:#444; }
+        .arrow-value {
+            flex:1; display:flex; align-items:center; justify-content:center; gap:5px;
+            font-size:1.5rem; font-weight:300; font-variant-numeric:tabular-nums;
+            background:#fafafa; border-left:1px solid #ccc; border-right:1px solid #ccc;
+            cursor:text; position:relative;
+        }
+        .arrow-unit { font-size:0.68rem; color:#aaa; align-self:flex-end; padding-bottom:10px; }
+        .arrow-value input.sp-inline {
+            width:75%; border:none; border-bottom:2px solid #1a1a1a; background:transparent;
+            font-family:inherit; font-size:1.4rem; font-weight:300; font-variant-numeric:tabular-nums;
+            text-align:center; outline:none; color:#1a1a1a;
+        }
+        #feedback { font-size:0.7rem; color:#555; margin-top:8px; min-height:13px; }
+
+        /* ── Alarm thresholds table ── */
+        .alarm-thresholds { width:100%; border-collapse:collapse; font-size:0.78rem; margin-top:14px; }
+        .alarm-thresholds th {
+            font-size:0.6rem; letter-spacing:.1em; text-transform:uppercase; color:#aaa;
+            font-weight:400; text-align:left; padding:0 0 6px; border-bottom:1px solid #eee;
+        }
+        .alarm-thresholds td { padding:5px 0; border-bottom:1px solid #f8f8f8; }
+        .alarm-thresholds td:last-child { text-align:right; }
+        .alarm-badge {
+            display:inline-block; font-size:0.58rem; font-weight:700; letter-spacing:.06em;
+            padding:1px 6px; color:#fff; border-radius:2px;
+        }
+        .alarm-thresholds input {
+            width:70px; padding:3px 6px; border:1px solid #ddd;
+            font-size:0.82rem; font-family:inherit; background:#fafafa; outline:none; text-align:right;
+        }
+        .alarm-thresholds input:focus { border-color:#1a1a1a; background:#fff; }
+        .alarm-unit { font-size:0.7rem; color:#aaa; margin-left:4px; }
+
+        /* ── KPI row ── */
+        .kpi-strip {
+            display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin-top:12px;
+        }
+        .kpi-strip.four { grid-template-columns:repeat(4,1fr); }
+        .kpi-cell {
+            background:#f8f8f8; border:1px solid #eee; padding:6px 8px; text-align:center;
+        }
+        .kpi-cell .kpi-label { font-size:0.58rem; letter-spacing:.1em; text-transform:uppercase; color:#bbb; margin-bottom:3px; }
+        .kpi-cell .kpi-val   { font-size:0.88rem; font-weight:300; font-variant-numeric:tabular-nums; }
+
+        /* ── Charts ── */
+        .chart-wrap { position:relative; height:160px; margin-bottom:0; }
+        .pid-chart-wrap { position:relative; height:200px; margin-bottom:14px; }
+
+        /* ── Window selector ── */
+        .window-selector { display:flex; gap:4px; margin-bottom:10px; }
+        .win-btn {
+            padding:2px 10px; font-family:inherit; font-size:0.6rem;
+            letter-spacing:.08em; text-transform:uppercase;
+            border:1px solid #ddd; background:#fff; color:#888; cursor:pointer;
+        }
+        .win-btn:hover  { border-color:#999; color:#555; }
+        .win-btn.active { background:#1a1a1a; color:#fff; border-color:#1a1a1a; }
+
+        /* ── PID metrics ── */
+        .pid-metrics { width:100%; border-collapse:collapse; font-size:0.76rem; margin-bottom:16px; }
+        .pid-metrics th {
+            font-size:0.6rem; letter-spacing:.1em; text-transform:uppercase; color:#aaa;
+            font-weight:400; text-align:left; padding:0 0 6px; border-bottom:1px solid #eee;
+        }
+        .pid-metrics td { padding:6px 0; border-bottom:1px solid #f5f5f5; color:#333; }
+        .pid-metrics td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+        .pid-metrics .td-label { color:#888; }
+
+        /* ── Gains ── */
+        .gains-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
+        .gain-field { display:flex; flex-direction:column; gap:4px; }
+        .gain-field label { font-size:0.6rem; letter-spacing:.1em; text-transform:uppercase; color:#aaa; }
+        .gain-field input {
+            width:100%; padding:5px 8px; border:1px solid #ddd;
+            font-size:0.85rem; font-family:inherit; background:#fafafa; outline:none;
+        }
+        .gain-field input:focus { border-color:#1a1a1a; background:#fff; }
+        #pid-feedback { font-size:0.68rem; color:#888; margin-top:7px; min-height:12px; }
+
+        /* ── Alarm log ── */
+        .alarm-log-body {
+            max-height:180px; overflow-y:auto; font-size:0.72rem;
+        }
+        .alarm-log-body::-webkit-scrollbar { width:3px; }
+        .alarm-log-body::-webkit-scrollbar-thumb { background:#ddd; }
+        .alarm-log-table { width:100%; border-collapse:collapse; }
+        .alarm-log-table td { padding:4px 6px; border-bottom:1px solid #f5f5f5; vertical-align:top; }
+        .alarm-log-table td:first-child  { color:#bbb; font-size:0.65rem; white-space:nowrap; width:60px; }
+        .alarm-log-table td:nth-child(2) { width:36px; }
+        .alarm-log-table td:last-child   { color:#555; }
+        .log-cleared { color:#aaa !important; text-decoration:line-through; }
+
+        /* ── Buttons ── */
+        .btn {
+            padding:7px 18px; background:#1a1a1a; color:#fff; border:none;
+            font-family:inherit; font-size:0.7rem; letter-spacing:.07em;
+            text-transform:uppercase; cursor:pointer;
+        }
+        .btn:hover { background:#333; }
+        .btn-sm { padding:5px 12px; font-size:0.66rem; }
+
+        /* ── Status bar ── */
+        .status-row {
+            font-size:0.72rem; color:#666; display:flex; gap:24px;
+            border-top:1px solid #ddd; padding-top:12px;
+        }
+        .status-row span { color:#bbb; margin-right:4px; }
+        a { color:#1a1a1a; }
+
+        /* ── PID right column ── */
+        .pid-column { position:sticky; top:28px; }
+
+        /* ── Replay section ── */
+        .replay-wrap { margin-top:16px; background:#fff; border:1px solid #ddd; }
+        .replay-header {
+            display:flex; justify-content:space-between; align-items:center;
+            padding:8px 16px; cursor:pointer; user-select:none;
+            border-bottom:1px solid transparent;
+        }
+        .replay-header:hover { background:#fafafa; }
+        .replay-header.open { border-bottom-color:#eee; }
+        .replay-header span:first-child {
+            font-size:0.62rem; letter-spacing:.12em; text-transform:uppercase; color:#999;
+        }
+        .replay-header span:last-child { font-size:0.7rem; color:#bbb; }
+        .replay-body { padding:16px; display:none; }
+        .replay-body.open { display:block; }
+        .replay-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+        .replay-controls label {
+            font-size:0.62rem; letter-spacing:.08em; text-transform:uppercase; color:#888;
+        }
+        .replay-controls select {
+            padding:4px 8px; border:1px solid #ddd; font-family:inherit; font-size:0.78rem;
+            background:#fafafa; outline:none;
+        }
+        #replaySlider { flex:1; min-width:120px; accent-color:#1a1a1a; }
+        #replayInfo { font-size:0.7rem; color:#aaa; white-space:nowrap; }
+        .replay-live-btn {
+            padding:4px 12px; background:none; border:1px solid #c47200; color:#c47200;
+            font-family:inherit; font-size:0.62rem; letter-spacing:.07em;
+            text-transform:uppercase; cursor:pointer;
+        }
+        .replay-live-btn:hover { background:#c47200; color:#fff; }
+
+        /* ── Terminal ── */
+        .terminal-wrap { margin-top:14px; border:1px solid #ddd; background:#fff; }
+        .terminal-header {
+            display:flex; justify-content:space-between; align-items:center;
+            padding:7px 14px; border-bottom:1px solid #eee;
+        }
+        .terminal-header span {
+            font-size:0.6rem; letter-spacing:.12em; text-transform:uppercase; color:#999;
+        }
+        .terminal-header button {
+            font-size:0.58rem; letter-spacing:.08em; text-transform:uppercase;
+            background:none; border:1px solid #ddd; color:#aaa; padding:2px 9px;
+            cursor:pointer; font-family:inherit;
+        }
+        .terminal-header button:hover { border-color:#999; color:#666; }
+        .terminal-body {
+            height:160px; overflow-y:auto; padding:8px 14px;
+            background:#111; font-family:"Courier New",Consolas,monospace;
+            font-size:0.7rem; line-height:1.7;
+        }
+        .terminal-body::-webkit-scrollbar { width:4px; }
+        .terminal-body::-webkit-scrollbar-thumb { background:#333; }
+        .t-line  { display:flex; gap:10px; }
+        .t-ts    { color:#555; flex-shrink:0; }
+        .t-src   { color:#4a9eff; flex-shrink:0; width:70px; }
+        .t-data  { color:#ccc; }
+        .t-key   { color:#888; }
+        .t-val   { color:#e8e8e8; }
+        .t-cursor { display:inline-block; width:7px; height:12px; background:#4a9eff;
+                    animation:blink 1s step-end infinite; vertical-align:middle; margin-left:3px; }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    </style>
+</head>
+<body>
+<header>
+    <h1>Thermal Process Monitor</h1>
+    <p>Siemens S7-1500 — Containerised with Docker</p>
+</header>
+
+<nav class="navbar">
+    <a href="/" class="nav-btn active">Monitor</a>
+    <a href="/test" class="nav-btn">Test DB</a>
+    <div class="nav-sep"></div>
+    <a href="/api/data" class="nav-btn api" target="_blank">/api/data</a>
+    <a href="/api/status" class="nav-btn api" target="_blank">/api/status</a>
+    <a href="/api/export/csv" class="nav-btn api">/export csv</a>
+    <span class="conn-indicator conn-err" id="connStatus">● connecting</span>
+</nav>
+
+<div class="alarm-banner" id="alarmBanner">
+    <span class="a-icon">!</span>
+    <span class="a-msg" id="alarmMsg">Alarme</span>
+    <button class="a-ack" onclick="ackAlarm()">Acquitter</button>
+</div>
+
+<div class="layout">
+
+    <!-- ═══ LEFT COLUMN ═══ -->
+    <div>
+        <div class="sim-badge" id="sourceBadge">Source: <span id="source">--</span></div>
+
+        <!-- P&ID Synoptique -->
+        <div class="panel">
+            <div class="panel-title">P&amp;ID — Synoptique procédé</div>
+            <div class="pid-svg-wrap">
+            <svg viewBox="0 0 570 170" xmlns="http://www.w3.org/2000/svg">
+
+                <!-- ══ MAIN PROCESS LINE ══ -->
+                <!-- Feed pipe -->
+                <line x1="18" y1="82" x2="76" y2="82" stroke="#666" stroke-width="4" stroke-linecap="round"/>
+                <!-- Flow anim overlay (feed) -->
+                <line id="anim-feed" x1="18" y1="82" x2="76" y2="82" stroke="#4a9eff" stroke-width="2"
+                      stroke-linecap="round" opacity="0.5" class="flow-anim"/>
+                <!-- Arrow feed -->
+                <polygon points="50,77 62,82 50,87" fill="#999"/>
+
+                <!-- FT-001 -->
+                <circle cx="100" cy="82" r="23" fill="white" stroke="#555" stroke-width="1.5"/>
+                <text x="100" y="79" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="9.5" fill="#333" font-weight="600">FT</text>
+                <text x="100" y="91" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7.5" fill="#999">001</text>
+
+                <!-- Pipe FT→CV -->
+                <line x1="123" y1="82" x2="158" y2="82" stroke="#666" stroke-width="4" stroke-linecap="round"/>
+                <line id="anim-ftcv" x1="123" y1="82" x2="158" y2="82" stroke="#4a9eff" stroke-width="2"
+                      stroke-linecap="round" opacity="0.5" class="flow-anim"/>
+
+                <!-- CV-001 Control Valve (bowtie) -->
+                <!-- Actuator -->
+                <line x1="195" y1="82" x2="195" y2="46" stroke="#666" stroke-width="1.5"/>
+                <line x1="182" y1="46" x2="208" y2="46" stroke="#666" stroke-width="2.5"/>
+                <text x="195" y="40" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7.5" fill="#aaa">CV-001</text>
+                <!-- Left triangle -->
+                <polygon id="cv-left"  points="158,64 158,100 195,82" fill="#e0e0e0" stroke="#555" stroke-width="1.5"/>
+                <!-- Right triangle -->
+                <polygon id="cv-right" points="232,64 232,100 195,82" fill="#e0e0e0" stroke="#555" stroke-width="1.5"/>
+
+                <!-- Pipe CV→HE -->
+                <line x1="232" y1="82" x2="268" y2="82" stroke="#666" stroke-width="4" stroke-linecap="round"/>
+                <line id="anim-cvhe" x1="232" y1="82" x2="268" y2="82" stroke="#4a9eff" stroke-width="2"
+                      stroke-linecap="round" opacity="0.5" class="flow-anim"/>
+
+                <!-- HE-001 Heat Exchanger -->
+                <rect id="he-box" x="268" y="50" width="132" height="64" rx="2" fill="#fafafa" stroke="#555" stroke-width="1.5"/>
+                <!-- Tube coils inside HE (top row) -->
+                <polyline points="280,63 291,73 302,63 313,73 324,63 335,73 346,63 357,73 368,63 379,73 390,63"
+                          fill="none" stroke="#ddd" stroke-width="1.5" stroke-linejoin="round"/>
+                <!-- Tube coils inside HE (bottom row) -->
+                <polyline points="280,91 291,101 302,91 313,101 324,91 335,101 346,91 357,101 368,91 379,101 390,91"
+                          fill="none" stroke="#ddd" stroke-width="1.5" stroke-linejoin="round"/>
+                <text x="334" y="83" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="8" fill="#c0c0c0" font-weight="600">HE-001</text>
+
+                <!-- Pipe HE→TT -->
+                <line x1="400" y1="82" x2="432" y2="82" stroke="#666" stroke-width="4" stroke-linecap="round"/>
+                <line id="anim-hett" x1="400" y1="82" x2="432" y2="82" stroke="#ff6b35" stroke-width="2"
+                      stroke-linecap="round" opacity="0.5" class="flow-anim"/>
+
+                <!-- TT-001 -->
+                <circle cx="456" cy="82" r="23" fill="white" stroke="#555" stroke-width="1.5"/>
+                <text x="456" y="79" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="9.5" fill="#333" font-weight="600">TT</text>
+                <text x="456" y="91" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7.5" fill="#999">001</text>
+
+                <!-- Pipe after TT (outlet) -->
+                <line x1="479" y1="82" x2="548" y2="82" stroke="#666" stroke-width="4" stroke-linecap="round"/>
+                <line id="anim-out" x1="479" y1="82" x2="548" y2="82" stroke="#ff6b35" stroke-width="2"
+                      stroke-linecap="round" opacity="0.5" class="flow-anim"/>
+                <!-- Arrow outlet -->
+                <polygon points="514,77 526,82 514,87" fill="#999"/>
+
+                <!-- Feed / Product labels -->
+                <text x="10" y="86" font-family="'Segoe UI',sans-serif" font-size="8" fill="#bbb" text-anchor="end">FEED</text>
+                <text x="553" y="86" font-family="'Segoe UI',sans-serif" font-size="8" fill="#bbb">PROD</text>
+
+                <!-- ══ LIVE VALUES ══ -->
+                <!-- FT dashed connector + values -->
+                <line x1="100" y1="105" x2="100" y2="118" stroke="#ddd" stroke-width="1" stroke-dasharray="2,2"/>
+                <text x="100" y="129" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="10" fill="#333" id="svg-flow-pv">-- m³/h</text>
+                <text x="100" y="141" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="8" fill="#bbb">SP: <tspan id="svg-flow-sp">--</tspan></text>
+
+                <!-- CV state -->
+                <line x1="195" y1="105" x2="195" y2="118" stroke="#ddd" stroke-width="1" stroke-dasharray="2,2"/>
+                <text x="195" y="129" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="10" fill="#333" id="svg-valve-pv">--</text>
+                <text x="195" y="141" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7.5" fill="#bbb" id="svg-valve-pct">--</text>
+
+                <!-- TT dashed connector + values -->
+                <line x1="456" y1="105" x2="456" y2="118" stroke="#ddd" stroke-width="1" stroke-dasharray="2,2"/>
+                <text x="456" y="129" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="10" fill="#333" id="svg-temp-pv">-- °C</text>
+                <text x="456" y="141" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="8" fill="#bbb">SP: <tspan id="svg-temp-sp">--</tspan> °C</text>
+            </svg>
+            </div>
+        </div>
+
+        <!-- Process cards -->
+        <div class="cards-grid">
+            <div class="card">
+                <div class="c-label">Temperature</div>
+                <div class="c-value" id="temperature">--</div>
+                <div class="c-unit">deg C</div>
+                <div class="c-sp">SP: <span id="setpoint_temp">--</span> deg C</div>
+            </div>
+            <div class="card">
+                <div class="c-label">Flow Rate</div>
+                <div class="c-value" id="flow_rate">--</div>
+                <div class="c-unit">m3/h</div>
+                <div class="c-sp">SP: <span id="setpoint_flow">--</span> m3/h</div>
+            </div>
+            <div class="card">
+                <div class="c-label">Valve State</div>
+                <div class="c-value" style="font-size:1.2rem;margin-top:4px;display:flex;align-items:center;">
+                    <span class="valve-dot" id="valveDot"></span>
+                    <span id="valveText">--</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Setpoints + Alarm thresholds -->
+        <div class="panel">
+            <div class="panel-title">Setpoint Control</div>
+
+            <div class="sp-field">
+                <div class="sp-label">Temperature <span class="sp-hint">°C · 0–500 · step 0.5 · dbl-clic pour saisir</span></div>
+                <div class="arrow-ctrl">
+                    <button class="arrow-btn" onpointerdown="startRepeat('temperature',-0.5)" onpointerup="stopRepeat()" onpointercancel="stopRepeat()" onpointerleave="stopRepeat()">&lt;</button>
+                    <div class="arrow-value" id="av-temp" ondblclick="enableInlineEdit('temperature')">
+                        <span id="sp-temp-val">{{ sp_temp }}</span>
+                        <span class="arrow-unit">°C</span>
+                    </div>
+                    <button class="arrow-btn" onpointerdown="startRepeat('temperature', 0.5)" onpointerup="stopRepeat()" onpointercancel="stopRepeat()" onpointerleave="stopRepeat()">&gt;</button>
+                </div>
+            </div>
+
+            <div class="sp-field">
+                <div class="sp-label">Flow Rate <span class="sp-hint">m³/h · 0–20 · step 0.1</span></div>
+                <div class="arrow-ctrl">
+                    <button class="arrow-btn" onpointerdown="startRepeat('flow_rate',-0.1)" onpointerup="stopRepeat()" onpointercancel="stopRepeat()" onpointerleave="stopRepeat()">&lt;</button>
+                    <div class="arrow-value" id="av-flow" ondblclick="enableInlineEdit('flow_rate')">
+                        <span id="sp-flow-val">{{ sp_flow }}</span>
+                        <span class="arrow-unit">m³/h</span>
+                    </div>
+                    <button class="arrow-btn" onpointerdown="startRepeat('flow_rate', 0.1)" onpointerup="stopRepeat()" onpointercancel="stopRepeat()" onpointerleave="stopRepeat()">&gt;</button>
+                </div>
+            </div>
+            <div id="feedback"></div>
+
+            <!-- Multi-level alarm thresholds -->
+            <div class="panel-title" style="margin-top:16px">Seuils d'alarme — Température</div>
+            <table class="alarm-thresholds">
+                <thead><tr><th>Niveau</th><th>Direction</th><th style="text-align:right">Seuil</th><th style="text-align:right"></th></tr></thead>
+                <tbody>
+                    <tr>
+                        <td><span class="alarm-badge" style="background:#7a0000">HH</span></td>
+                        <td style="color:#aaa;font-size:0.72rem">HIGH HIGH</td>
+                        <td><input type="number" id="thr-HH" value="480" min="0" max="500" step="5"></td>
+                        <td><span class="alarm-unit">°C</span></td>
+                    </tr>
+                    <tr>
+                        <td><span class="alarm-badge" style="background:#c00">H</span></td>
+                        <td style="color:#aaa;font-size:0.72rem">HIGH</td>
+                        <td><input type="number" id="thr-H" value="420" min="0" max="500" step="5"></td>
+                        <td><span class="alarm-unit">°C</span></td>
+                    </tr>
+                    <tr>
+                        <td><span class="alarm-badge" style="background:#0066cc">L</span></td>
+                        <td style="color:#aaa;font-size:0.72rem">LOW</td>
+                        <td><input type="number" id="thr-L" value="40" min="0" max="500" step="5"></td>
+                        <td><span class="alarm-unit">°C</span></td>
+                    </tr>
+                    <tr>
+                        <td><span class="alarm-badge" style="background:#003d80">LL</span></td>
+                        <td style="color:#aaa;font-size:0.72rem">LOW LOW</td>
+                        <td><input type="number" id="thr-LL" value="20" min="0" max="500" step="5"></td>
+                        <td><span class="alarm-unit">°C</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Flow chart + KPIs -->
+        <div class="panel">
+            <div class="panel-title">Flow Rate — historique</div>
+            <div class="chart-wrap"><canvas id="flowChart"></canvas></div>
+            <div class="kpi-strip four" id="kpi-flow">
+                <div class="kpi-cell"><div class="kpi-label">Min</div><div class="kpi-val" id="kf-min">--</div></div>
+                <div class="kpi-cell"><div class="kpi-label">Max</div><div class="kpi-val" id="kf-max">--</div></div>
+                <div class="kpi-cell"><div class="kpi-label">Mean</div><div class="kpi-val" id="kf-mean">--</div></div>
+                <div class="kpi-cell"><div class="kpi-label">Std σ</div><div class="kpi-val" id="kf-std">--</div></div>
+            </div>
+        </div>
+
+        <!-- Status -->
+        <div class="status-row">
+            <div><span>PLC IP</span><span id="plc_ip">--</span></div>
+            <div><span>API</span><a href="/api/data">/api/data</a></div>
+        </div>
+    </div>
+
+    <!-- ═══ RIGHT COLUMN ═══ -->
+    <div class="pid-column">
+        <div class="panel">
+            <div class="panel-title">PID Controller — Temperature Loop</div>
+
+            <div class="window-selector">
+                <button class="win-btn active" onclick="setWindow(5,this)">5 min</button>
+                <button class="win-btn"        onclick="setWindow(15,this)">15 min</button>
+                <button class="win-btn"        onclick="setWindow(60,this)">1 h</button>
+            </div>
+
+            <div class="pid-chart-wrap"><canvas id="pidChart"></canvas></div>
+
+            <!-- Temp KPIs -->
+            <div class="kpi-strip" id="kpi-temp" style="margin-bottom:14px;">
+                <div class="kpi-cell"><div class="kpi-label">Min</div><div class="kpi-val" id="kt-min">--</div></div>
+                <div class="kpi-cell"><div class="kpi-label">Max</div><div class="kpi-val" id="kt-max">--</div></div>
+                <div class="kpi-cell"><div class="kpi-label">Mean</div><div class="kpi-val" id="kt-mean">--</div></div>
+                <div class="kpi-cell"><div class="kpi-label">Std σ</div><div class="kpi-val" id="kt-std">--</div></div>
+                <div class="kpi-cell"><div class="kpi-label">±2°C</div><div class="kpi-val" id="kt-within">--%</div></div>
+            </div>
+
+            <table class="pid-metrics">
+                <thead><tr><th>Parameter</th><th style="text-align:right">Value</th></tr></thead>
+                <tbody>
+                    <tr><td class="td-label">Error (SP − PV)</td><td id="pid_error">--</td></tr>
+                    <tr><td class="td-label">P term</td><td id="pid_p">--</td></tr>
+                    <tr><td class="td-label">I term</td><td id="pid_i">--</td></tr>
+                    <tr><td class="td-label">D term</td><td id="pid_d">--</td></tr>
+                    <tr><td class="td-label"><strong>Output u(t)</strong></td><td id="pid_out"><strong>--</strong></td></tr>
+                </tbody>
+            </table>
+
+            <div class="panel-title">Controller Gains</div>
+            <div class="gains-grid">
+                <div class="gain-field"><label>Kp</label><input type="number" id="kp" step="0.1" min="0"></div>
+                <div class="gain-field"><label>Ki</label><input type="number" id="ki" step="0.01" min="0"></div>
+                <div class="gain-field"><label>Kd</label><input type="number" id="kd" step="0.01" min="0"></div>
+            </div>
+            <button class="btn btn-sm" id="applyGains">Apply Gains</button>
+            <div id="pid-feedback"></div>
+        </div>
+
+        <!-- Alarm Log -->
+        <div class="panel">
+            <div class="panel-title">Journal d'alarmes</div>
+            <div class="alarm-log-body">
+                <table class="alarm-log-table" id="alarmLogTable">
+                    <tr><td colspan="3" style="color:#bbb;font-size:0.7rem;padding:6px">Aucune alarme</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div><!-- end .layout -->
+
+<!-- Replay CSV -->
+<div class="replay-wrap">
+    <div class="replay-header" id="replayHeader" onclick="toggleReplay()">
+        <span>Replay CSV</span>
+        <span id="replayToggle">▶ Ouvrir</span>
+    </div>
+    <div class="replay-body" id="replayBody">
+        <div class="replay-controls">
+            <label>Fichier CSV</label>
+            <input type="file" id="csvFile" accept=".csv" onchange="loadCSV(event)">
+            <button class="btn btn-sm" id="replayPlay" onclick="startReplay()" disabled>▶ Play</button>
+            <button class="btn btn-sm" onclick="pauseReplay()">⏸ Pause</button>
+            <button class="btn btn-sm" onclick="stopReplay()">■ Stop</button>
+            <label>Vitesse</label>
+            <select id="replaySpeed">
+                <option value="1">1×</option>
+                <option value="5">5×</option>
+                <option value="10">10×</option>
+                <option value="30">30×</option>
+            </select>
+            <input type="range" id="replaySlider" min="0" value="0" oninput="seekReplay(this.value)">
+            <span id="replayInfo">-- / --</span>
+            <button class="replay-live-btn" onclick="goLive()">◉ Retour live</button>
+        </div>
+    </div>
+</div>
+
+<!-- Terminal -->
+<div class="terminal-wrap">
+    <div class="terminal-header">
+        <span>Data stream</span>
+        <button onclick="clearTerminal()">Clear</button>
+    </div>
+    <div class="terminal-body" id="terminal">
+        <div class="t-line">
+            <span class="t-ts">--:--:--</span>
+            <span class="t-src">INIT</span>
+            <span class="t-data">Waiting for data...<span class="t-cursor"></span></span>
+        </div>
+    </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════
+let isLive = true;
+let _fetching = false;
+
+// PID gains — localStorage
+let Kp = parseFloat(localStorage.getItem('pid_kp') ?? '2.0');
+let Ki = parseFloat(localStorage.getItem('pid_ki') ?? '0.5');
+let Kd = parseFloat(localStorage.getItem('pid_kd') ?? '0.1');
+document.getElementById('kp').value = Kp;
+document.getElementById('ki').value = Ki;
+document.getElementById('kd').value = Kd;
+let integralTerm = 0, prevError = null;
+const DT = 3;
+
+// Data buffer
+const BUFFER_MAX = 1200;
+const buf = { labels:[], pv:[], sp:[], flow:[], spFlow:[], pidOut:[] };
+let windowPts = 100; // 5 min default
+
+// Alarm state
+const ALARM_CFG = {
+    HH: { dir:'high', color:'#7a0000', cls:'lvl-HH' },
+    H:  { dir:'high', color:'#c00',    cls:'lvl-H'  },
+    L:  { dir:'low',  color:'#0066cc', cls:'lvl-L'  },
+    LL: { dir:'low',  color:'#003d80', cls:'lvl-LL' },
+};
+const activeAlarms = {};
+const ackedAlarms  = {};
+const alarmLog     = [];
+
+// Replay state
+let replayData   = [];
+let replayIndex  = 0;
+let replayTimer  = null;
+let replayPaused = false;
+
+// Terminal
+let termLines = 0;
+const MAX_LINES = 100;
+
+// ════════════════════════════════════════════════════
+// SOCKET.IO CONNECTION
+// ════════════════════════════════════════════════════
+const socket = io({ transports: ['websocket','polling'] });
+let _pollingInterval = null;
+
+socket.on('connect', () => {
+    setConnStatus('LIVE', 'conn-live');
+    stopPolling();
+});
+socket.on('disconnect', () => {
+    setConnStatus('POLLING', 'conn-polling');
+    startPolling();
+});
+socket.on('connect_error', () => {
+    setConnStatus('ERR', 'conn-err');
+    startPolling();
+});
+socket.on('process_data', d => {
+    if (isLive) processData(d);
+});
+
+function setConnStatus(txt, cls) {
+    const el = document.getElementById('connStatus');
+    el.textContent = '● ' + txt;
+    el.className = 'conn-indicator ' + cls;
+}
+function startPolling() {
+    if (_pollingInterval) return;
+    _pollingInterval = setInterval(fetchHTTP, 3000);
+    fetchHTTP();
+}
+function stopPolling() {
+    clearInterval(_pollingInterval);
+    _pollingInterval = null;
+}
+function fetchHTTP() {
+    if (!isLive || _fetching) return;
+    _fetching = true;
+    fetch('/api/data').then(r => r.json()).then(d => { _fetching = false; processData(d); })
+                      .catch(() => { _fetching = false; });
+}
+
+// ════════════════════════════════════════════════════
+// CHARTS
+// ════════════════════════════════════════════════════
+const pidChart = new Chart(document.getElementById('pidChart').getContext('2d'), {
+    type:'line',
+    data:{
+        labels:[],
+        datasets:[
+            { label:'PV (°C)',  data:[], borderColor:'#1a1a1a', borderWidth:1.5, pointRadius:0, tension:0.3, fill:false, yAxisID:'yTemp' },
+            { label:'SP (°C)',  data:[], borderColor:'#bbb',    borderWidth:1,   pointRadius:0, tension:0, borderDash:[5,4], fill:false, yAxisID:'yTemp' },
+            { label:'u(t) %',   data:[], borderColor:'#4a9eff', borderWidth:1,   pointRadius:0, tension:0.2, borderDash:[3,3], fill:false, yAxisID:'yOut'  },
+        ]
+    },
+    options:{
+        animation:false, responsive:true, maintainAspectRatio:false,
+        interaction:{ mode:'index', intersect:false },
+        plugins:{ legend:{ labels:{ font:{size:10}, color:'#888', boxWidth:14, padding:10 } } },
+        scales:{
+            x:{ ticks:{font:{size:9},color:'#bbb',maxTicksLimit:6,maxRotation:0}, grid:{color:'#f0f0f0'} },
+            yTemp:{ type:'linear', position:'left',  ticks:{font:{size:10},color:'#888'}, grid:{color:'#f0f0f0'},
+                    title:{display:true,text:'°C',font:{size:9},color:'#bbb'} },
+            yOut: { type:'linear', position:'right', min:0, max:100, ticks:{font:{size:9},color:'#4a9eff'},
+                    grid:{drawOnChartArea:false}, title:{display:true,text:'u %',font:{size:9},color:'#4a9eff'} },
+        }
+    }
+});
+
+const flowChart = new Chart(document.getElementById('flowChart').getContext('2d'), {
+    type:'line',
+    data:{
+        labels:[],
+        datasets:[
+            { label:'Flow PV', data:[], borderColor:'#1a1a1a', borderWidth:1.5, pointRadius:0, tension:0.3, fill:false },
+            { label:'Flow SP', data:[], borderColor:'#bbb',    borderWidth:1,   pointRadius:0, tension:0, borderDash:[5,4], fill:false },
+        ]
+    },
+    options:{
+        animation:false, responsive:true, maintainAspectRatio:false,
+        interaction:{ mode:'index', intersect:false },
+        plugins:{ legend:{ labels:{ font:{size:10}, color:'#888', boxWidth:14, padding:10 } } },
+        scales:{
+            x:{ ticks:{font:{size:9},color:'#bbb',maxTicksLimit:6,maxRotation:0}, grid:{color:'#f0f0f0'} },
+            y:{ ticks:{font:{size:10},color:'#888'}, grid:{color:'#f0f0f0'},
+                title:{display:true,text:'m³/h',font:{size:9},color:'#bbb'} },
+        }
+    }
+});
+
+function setWindow(minutes, btn) {
+    windowPts = Math.round(minutes * 60 / DT);
+    document.querySelectorAll('.win-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    rebuildCharts();
+}
+function rebuildCharts() {
+    const n = Math.min(windowPts, buf.labels.length);
+    const sl = a => a.slice(-n);
+    pidChart.data.labels             = sl(buf.labels);
+    pidChart.data.datasets[0].data   = sl(buf.pv);
+    pidChart.data.datasets[1].data   = sl(buf.sp);
+    pidChart.data.datasets[2].data   = sl(buf.pidOut);
+    pidChart.update('none');
+    flowChart.data.labels            = sl(buf.labels);
+    flowChart.data.datasets[0].data  = sl(buf.flow);
+    flowChart.data.datasets[1].data  = sl(buf.spFlow);
+    flowChart.update('none');
+    computeKPIs();
+}
+
+// ════════════════════════════════════════════════════
+// PID
+// ════════════════════════════════════════════════════
+function computePID(pv, sp) {
+    const error = sp - pv;
+    integralTerm = Math.max(-100, Math.min(100, integralTerm + error * DT));
+    const deriv = prevError !== null ? (error - prevError) / DT : 0;
+    prevError = error;
+    const P = Kp*error, I = Ki*integralTerm, D = Kd*deriv;
+    return { error, P, I, D, output: Math.max(0, Math.min(100, P+I+D)) };
+}
+
+// ════════════════════════════════════════════════════
+// KPIs
+// ════════════════════════════════════════════════════
+function computeKPIs() {
+    const n = Math.min(windowPts, buf.pv.length);
+    if (!n) return;
+    const pvSlice = buf.pv.slice(-n);
+    const spSlice = buf.sp.slice(-n);
+    const flSlice = buf.flow.slice(-n);
+
+    function stats(arr) {
+        const min  = Math.min(...arr), max = Math.max(...arr);
+        const mean = arr.reduce((s,v)=>s+v,0)/arr.length;
+        const std  = Math.sqrt(arr.reduce((s,v)=>s+(v-mean)**2,0)/arr.length);
+        return { min:min.toFixed(1), max:max.toFixed(1), mean:mean.toFixed(2), std:std.toFixed(2) };
+    }
+    const t = stats(pvSlice), f = stats(flSlice);
+    const withinCount = pvSlice.filter((v,i) => Math.abs(v - spSlice[i]) <= 2).length;
+    const withinPct = (withinCount / pvSlice.length * 100).toFixed(1);
+
+    document.getElementById('kt-min').textContent    = t.min;
+    document.getElementById('kt-max').textContent    = t.max;
+    document.getElementById('kt-mean').textContent   = t.mean;
+    document.getElementById('kt-std').textContent    = t.std;
+    document.getElementById('kt-within').textContent = withinPct + '%';
+    document.getElementById('kf-min').textContent    = f.min;
+    document.getElementById('kf-max').textContent    = f.max;
+    document.getElementById('kf-mean').textContent   = f.mean;
+    document.getElementById('kf-std').textContent    = f.std;
+}
+
+// ════════════════════════════════════════════════════
+// MULTI-LEVEL ALARMS
+// ════════════════════════════════════════════════════
+function getThreshold(id) { return parseFloat(document.getElementById('thr-' + id).value) || 0; }
+
+function checkAlarms(temp) {
+    const thresholds = {
+        HH: getThreshold('HH'), H: getThreshold('H'),
+        L:  getThreshold('L'),  LL: getThreshold('LL'),
+    };
+    let topActive = null;
+
+    const priority = ['HH','H','L','LL'];
+    for (const lvl of priority) {
+        const cfg = ALARM_CFG[lvl];
+        const thr = thresholds[lvl];
+        const triggered = cfg.dir === 'high' ? temp > thr : temp < thr;
+
+        if (triggered && !activeAlarms[lvl]) {
+            activeAlarms[lvl] = true;
+            ackedAlarms[lvl]  = false;
+            pushAlarmLog(lvl, `Temp ${temp.toFixed(1)}°C ${cfg.dir==='high'?'>':'<'} ${thr}°C`, 'ACTIVE');
+        } else if (!triggered && activeAlarms[lvl]) {
+            activeAlarms[lvl] = false;
+            pushAlarmLog(lvl, `Cleared — Temp ${temp.toFixed(1)}°C`, 'CLEARED');
+        }
+        if (triggered && !ackedAlarms[lvl] && !topActive) topActive = lvl;
+    }
+
+    const banner = document.getElementById('alarmBanner');
+    if (topActive) {
+        const cfg = ALARM_CFG[topActive];
+        banner.className = 'alarm-banner active ' + cfg.cls;
+        document.getElementById('alarmMsg').textContent =
+            `ALARME ${topActive} — Température ${temp.toFixed(1)} °C (seuil ${thresholds[topActive]} °C)`;
+    } else {
+        banner.className = 'alarm-banner';
+    }
+}
+
+function ackAlarm() {
+    for (const lvl of Object.keys(activeAlarms)) {
+        if (activeAlarms[lvl]) ackedAlarms[lvl] = true;
+    }
+    document.getElementById('alarmBanner').className = 'alarm-banner';
+}
+
+function pushAlarmLog(lvl, msg, state) {
+    alarmLog.unshift({ time: new Date().toLocaleTimeString(), lvl, msg, state });
+    if (alarmLog.length > 60) alarmLog.pop();
+    renderAlarmLog();
+}
+
+function renderAlarmLog() {
+    const tbl = document.getElementById('alarmLogTable');
+    if (!alarmLog.length) {
+        tbl.innerHTML = '<tr><td colspan="3" style="color:#bbb;font-size:0.7rem;padding:6px">Aucune alarme</td></tr>';
+        return;
+    }
+    const colors = { HH:'#7a0000', H:'#c00', L:'#0066cc', LL:'#003d80' };
+    tbl.innerHTML = alarmLog.map(e => {
+        const cls = e.state === 'CLEARED' ? 'log-cleared' : '';
+        return `<tr class="${cls}">
+            <td>${e.time}</td>
+            <td><span class="alarm-badge" style="background:${colors[e.lvl]}">${e.lvl}</span></td>
+            <td>${e.msg} <span style="color:#bbb;font-size:0.65rem">[${e.state}]</span></td>
+        </tr>`;
+    }).join('');
+}
+
+// ════════════════════════════════════════════════════
+// P&ID SVG UPDATE
+// ════════════════════════════════════════════════════
+function updateSVG(d) {
+    const flowVal  = typeof d.flow_rate   === 'number' ? d.flow_rate.toFixed(1)    : '--';
+    const tempVal  = typeof d.temperature === 'number' ? d.temperature.toFixed(1)  : '--';
+    const spf      = typeof d.setpoint_flow === 'number' ? d.setpoint_flow.toFixed(1) : '--';
+    const spt      = typeof d.setpoint_temp === 'number' ? d.setpoint_temp.toFixed(1) : '--';
+    document.getElementById('svg-flow-pv').textContent  = flowVal + ' m³/h';
+    document.getElementById('svg-flow-sp').textContent  = spf;
+    document.getElementById('svg-temp-pv').textContent  = tempVal + ' °C';
+    document.getElementById('svg-temp-sp').textContent  = spt;
+    document.getElementById('svg-valve-pv').textContent = d.valve_state || '--';
+
+    // Valve color
+    const vc = { OPEN:'#2a7a2a', PARTIAL:'#c47200', CLOSED:'#c00' };
+    const vc2 = { OPEN:'rgba(42,122,42,0.12)', PARTIAL:'rgba(196,114,0,0.12)', CLOSED:'rgba(204,0,0,0.12)' };
+    const fill = vc[d.valve_state] || '#e0e0e0';
+    const fill2 = vc2[d.valve_state] || '#e0e0e0';
+    document.getElementById('cv-left').setAttribute('fill',  fill2);
+    document.getElementById('cv-right').setAttribute('fill', fill2);
+    document.getElementById('cv-left').setAttribute('stroke',  fill);
+    document.getElementById('cv-right').setAttribute('stroke', fill);
+    document.getElementById('svg-valve-pv').setAttribute('fill', fill);
+
+    // HE box color (blue→orange based on temperature / setpoint ratio)
+    const ratio = d.setpoint_temp > 0 ? Math.min(1, Math.max(0, (d.temperature - 20) / (d.setpoint_temp - 20 || 1))) : 0;
+    const r = Math.round(255 * ratio), b = Math.round(200 * (1 - ratio));
+    document.getElementById('he-box').setAttribute('fill', `rgba(${r},${Math.round(r*0.3)},${b},0.08)`);
+
+    // Flow animation visibility
+    const hasFlow = (d.flow_rate || 0) > 0.1;
+    const anims = ['anim-feed','anim-ftcv','anim-cvhe','anim-hett','anim-out'];
+    anims.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = hasFlow ? '' : 'none';
+    });
+}
+
+// ════════════════════════════════════════════════════
+// VALVE CARD UPDATE
+// ════════════════════════════════════════════════════
+function updateValve(state) {
+    const dot = document.getElementById('valveDot');
+    const txt = document.getElementById('valveText');
+    const map = { OPEN:'open', PARTIAL:'partial', CLOSED:'closed' };
+    const cls = map[state] || '';
+    dot.className = 'valve-dot ' + cls;
+    txt.className = 'valve-' + cls;
+    txt.textContent = state || '--';
+}
+
+function updateSourceBadge(source) {
+    document.getElementById('source').textContent = source || '--';
+    const badge = document.getElementById('sourceBadge');
+    badge.className = 'sim-badge' + (source==='PLC'?' src-plc':source==='SIMULATION'?' src-sim':'');
+}
+
+// ════════════════════════════════════════════════════
+// SETPOINT CONTROLS
+// ════════════════════════════════════════════════════
+const SETPOINTS = { temperature: {{ sp_temp }}, flow_rate: {{ sp_flow }} };
+const SP_CONF   = {
+    temperature: { min:0, max:500, step:0.5, dec:1 },
+    flow_rate:   { min:0, max:20,  step:0.1, dec:1 },
+};
+let _spTimer=null, _repeatTimer=null, _pressStart=null;
+
+function updateSpDisplay() {
+    document.getElementById('sp-temp-val').textContent = SETPOINTS.temperature.toFixed(1);
+    document.getElementById('sp-flow-val').textContent = SETPOINTS.flow_rate.toFixed(1);
+}
+function adjustSp(field, baseDelta) {
+    const c = SP_CONF[field];
+    const elapsed = _pressStart ? Date.now() - _pressStart : 0;
+    const mult = elapsed>1500?20:elapsed>600?5:1;
+    const snapped = Math.round((SETPOINTS[field] + baseDelta*mult) / c.step) * c.step;
+    SETPOINTS[field] = Math.max(c.min, Math.min(c.max, snapped));
+    updateSpDisplay();
+    clearTimeout(_spTimer);
+    _spTimer = setTimeout(() => sendSetpoint(field), 400);
+}
+function startRepeat(field, delta) {
+    _pressStart = Date.now();
+    adjustSp(field, delta);
+    _repeatTimer = setInterval(() => adjustSp(field, delta), 200);
+}
+function stopRepeat() {
+    clearInterval(_repeatTimer); _repeatTimer = null; _pressStart = null;
+}
+function enableInlineEdit(field) {
+    const conf = SP_CONF[field];
+    const avEl = document.getElementById(field==='temperature' ? 'av-temp' : 'av-flow');
+    const spId = field==='temperature' ? 'sp-temp-val' : 'sp-flow-val';
+    const spEl = document.getElementById(spId);
+    const unit = avEl.querySelector('.arrow-unit');
+    if (avEl.querySelector('input.sp-inline')) return;
+    const inp = document.createElement('input');
+    inp.className = 'sp-inline'; inp.type='number';
+    inp.value = SETPOINTS[field].toFixed(conf.dec);
+    inp.min=conf.min; inp.max=conf.max; inp.step=conf.step;
+    spEl.replaceWith(inp); if(unit) unit.style.display='none';
+    inp.focus(); inp.select();
+    function commit() {
+        const raw = parseFloat(inp.value);
+        if (!isNaN(raw)) SETPOINTS[field] = Math.max(conf.min, Math.min(conf.max, Math.round(raw/conf.step)*conf.step));
+        const s = document.createElement('span'); s.id=spId;
+        s.textContent = SETPOINTS[field].toFixed(conf.dec);
+        inp.replaceWith(s); if(unit) unit.style.display='';
+        updateSpDisplay(); sendSetpoint(field);
+    }
+    inp.addEventListener('keydown', e => {
+        if(e.key==='Enter') { e.preventDefault(); commit(); }
+        if(e.key==='Escape') {
+            const s=document.createElement('span'); s.id=spId;
+            s.textContent=SETPOINTS[field].toFixed(conf.dec);
+            inp.replaceWith(s); if(unit) unit.style.display='';
+        }
+    });
+    inp.addEventListener('blur', commit);
+}
+function sendSetpoint(field) {
+    const fb = document.getElementById('feedback');
+    fetch('/api/setpoint', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ [field]: SETPOINTS[field] })
+    }).then(r=>r.json()).then(resp => {
+        fb.textContent = resp.message || resp.error;
+        setTimeout(()=>{ fb.textContent=''; }, 2000);
+        integralTerm=0; prevError=null;
+    }).catch(()=>{ fb.textContent='Request failed.'; });
+}
+
+// ════════════════════════════════════════════════════
+// TERMINAL
+// ════════════════════════════════════════════════════
+function pushTerminal(d) {
+    const term = document.getElementById('terminal');
+    const ts  = d.timestamp ? d.timestamp.slice(11,19) : '--:--:--';
+    const line = document.createElement('div');
+    line.className = 't-line';
+    line.innerHTML =
+        `<span class="t-ts">${ts}</span>` +
+        `<span class="t-src">${d.source||'?'}</span>` +
+        `<span class="t-data">` +
+        `<span class="t-key">temp=</span><span class="t-val">${d.temperature??'--'}</span>  ` +
+        `<span class="t-key">flow=</span><span class="t-val">${d.flow_rate??'--'}</span>  ` +
+        `<span class="t-key">sp_t=</span><span class="t-val">${d.setpoint_temp??'--'}</span>  ` +
+        `<span class="t-key">valve=</span><span class="t-val">${d.valve_state??'--'}</span>` +
+        `</span>`;
+    if (termLines===0) term.innerHTML='';
+    term.appendChild(line); termLines++;
+    if(termLines>MAX_LINES){ term.removeChild(term.firstChild); termLines--; }
+    term.scrollTop = term.scrollHeight;
+}
+function clearTerminal() { document.getElementById('terminal').innerHTML=''; termLines=0; }
+
+// ════════════════════════════════════════════════════
+// MAIN DATA PROCESSOR
+// ════════════════════════════════════════════════════
+function processData(d) {
+    // Cards
+    document.getElementById('temperature').textContent   = d.temperature;
+    document.getElementById('flow_rate').textContent     = d.flow_rate;
+    document.getElementById('setpoint_temp').textContent = d.setpoint_temp;
+    document.getElementById('setpoint_flow').textContent = d.setpoint_flow;
+    document.getElementById('plc_ip').textContent        = d.plc_ip;
+    updateValve(d.valve_state);
+    updateSourceBadge(d.source);
+    updateSVG(d);
+    checkAlarms(d.temperature);
+
+    // Sync setpoint display (not while pressing arrows)
+    if (!_repeatTimer) {
+        SETPOINTS.temperature = d.setpoint_temp;
+        SETPOINTS.flow_rate   = d.setpoint_flow;
+        updateSpDisplay();
+    }
+
+    // Buffer
+    const label = d.timestamp.slice(11,19);
+    const pid   = computePID(d.temperature, d.setpoint_temp);
+    buf.labels.push(label); buf.pv.push(d.temperature); buf.sp.push(d.setpoint_temp);
+    buf.flow.push(d.flow_rate); buf.spFlow.push(d.setpoint_flow);
+    buf.pidOut.push(parseFloat(pid.output.toFixed(1)));
+    if(buf.labels.length>BUFFER_MAX) ['labels','pv','sp','flow','spFlow','pidOut'].forEach(k=>buf[k].shift());
+    rebuildCharts();
+
+    // PID display
+    document.getElementById('pid_error').textContent = (pid.error>=0?'+':'')+pid.error.toFixed(2)+' °C';
+    document.getElementById('pid_p').textContent = pid.P.toFixed(3);
+    document.getElementById('pid_i').textContent = pid.I.toFixed(3);
+    document.getElementById('pid_d').textContent = pid.D.toFixed(3);
+    document.getElementById('pid_out').innerHTML = '<strong>'+pid.output.toFixed(1)+' %</strong>';
+
+    pushTerminal(d);
+}
+
+// ════════════════════════════════════════════════════
+// PID GAINS
+// ════════════════════════════════════════════════════
+document.getElementById('applyGains').addEventListener('click', () => {
+    Kp = parseFloat(document.getElementById('kp').value)||0;
+    Ki = parseFloat(document.getElementById('ki').value)||0;
+    Kd = parseFloat(document.getElementById('kd').value)||0;
+    localStorage.setItem('pid_kp',Kp); localStorage.setItem('pid_ki',Ki); localStorage.setItem('pid_kd',Kd);
+    integralTerm=0; prevError=null;
+    document.getElementById('pid-feedback').textContent = 'Gains: Kp='+Kp+' Ki='+Ki+' Kd='+Kd;
+});
+
+// ════════════════════════════════════════════════════
+// REPLAY CSV
+// ════════════════════════════════════════════════════
+// CSV columns: timestamp,temperature,setpoint_temp,flow_rate,setpoint_flow,valve_state,source
+function loadCSV(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+        const lines = e.target.result.split('\n').filter(l=>l.trim());
+        // skip header
+        replayData = lines.slice(1).map(line => {
+            const v = line.split(',');
+            return {
+                timestamp:     v[0]?.trim() || '--',
+                temperature:   parseFloat(v[1]) || 0,
+                setpoint_temp: parseFloat(v[2]) || 0,
+                flow_rate:     parseFloat(v[3]) || 0,
+                setpoint_flow: parseFloat(v[4]) || 0,
+                valve_state:   v[5]?.trim() || 'CLOSED',
+                source:        'REPLAY',
+                plc_ip:        v[6]?.trim() || '--',
+            };
+        }).filter(d => !isNaN(d.temperature));
+        const slider = document.getElementById('replaySlider');
+        slider.max = replayData.length - 1;
+        slider.value = 0;
+        document.getElementById('replayInfo').textContent = `0 / ${replayData.length}`;
+        document.getElementById('replayPlay').disabled = replayData.length === 0;
+    };
+    reader.readAsText(file);
+}
+function startReplay() {
+    if (!replayData.length) return;
+    isLive = false; replayPaused = false;
+    stopPolling();
+    clearInterval(replayTimer);
+    // clear charts
+    ['labels','pv','sp','flow','spFlow','pidOut'].forEach(k=>buf[k]=[]);
+    integralTerm=0; prevError=null;
+    replayIndex=0;
+    const speed = parseFloat(document.getElementById('replaySpeed').value) || 1;
+    replayTimer = setInterval(() => {
+        if (replayPaused || replayIndex >= replayData.length) {
+            if (replayIndex >= replayData.length) { clearInterval(replayTimer); }
+            return;
+        }
+        processData(replayData[replayIndex]);
+        document.getElementById('replaySlider').value = replayIndex;
+        document.getElementById('replayInfo').textContent = `${replayIndex+1} / ${replayData.length}`;
+        replayIndex++;
+    }, 3000 / speed);
+}
+function pauseReplay()  { replayPaused = !replayPaused; }
+function stopReplay()   { clearInterval(replayTimer); replayTimer=null; }
+function seekReplay(i)  {
+    replayIndex = parseInt(i);
+    document.getElementById('replayInfo').textContent = `${replayIndex+1} / ${replayData.length}`;
+    if (replayData[replayIndex]) processData(replayData[replayIndex]);
+}
+function goLive() {
+    stopReplay(); isLive=true;
+    ['labels','pv','sp','flow','spFlow','pidOut'].forEach(k=>buf[k]=[]);
+    integralTerm=0; prevError=null;
+    if (!socket.connected) startPolling();
+}
+function toggleReplay() {
+    const body   = document.getElementById('replayBody');
+    const toggle = document.getElementById('replayToggle');
+    const header = document.getElementById('replayHeader');
+    const open   = body.classList.toggle('open');
+    header.classList.toggle('open', open);
+    toggle.textContent = open ? '▼ Fermer' : '▶ Ouvrir';
+}
+</script>
+</body>
+</html>
