@@ -91,6 +91,11 @@
             animation:flow-move .9s linear infinite;
         }
         @keyframes flow-move { to { stroke-dashoffset:-17; } }
+        .flow-anim-rev {
+            stroke-dasharray:10 7;
+            animation:flow-move-rev .9s linear infinite;
+        }
+        @keyframes flow-move-rev { to { stroke-dashoffset:17; } }
 
         /* ── Process cards ── */
         .cards-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
@@ -329,88 +334,107 @@
         <div class="panel">
             <div class="panel-title">P&amp;ID — Synoptique procédé</div>
             <div class="pid-svg-wrap">
-            <svg viewBox="0 0 570 170" xmlns="http://www.w3.org/2000/svg">
+            <svg viewBox="0 0 570 172" xmlns="http://www.w3.org/2000/svg">
 
-                <!-- ══ MAIN PROCESS LINE ══ -->
-                <!-- Feed pipe -->
-                <line x1="18" y1="82" x2="76" y2="82" stroke="#666" stroke-width="4" stroke-linecap="round"/>
-                <!-- Flow anim overlay (feed) -->
-                <line id="anim-feed" x1="18" y1="82" x2="76" y2="82" stroke="#4a9eff" stroke-width="2"
-                      stroke-linecap="round" opacity="0.5" class="flow-anim"/>
-                <!-- Arrow feed -->
-                <polygon points="50,77 62,82 50,87" fill="#999"/>
+                <!-- ══ HEATER ══ -->
+                <rect id="heater-box" x="18" y="48" width="82" height="40" rx="2"
+                      fill="#fff8f0" stroke="#d45a00" stroke-width="2"/>
+                <text x="59" y="69" text-anchor="middle" font-family="'Segoe UI',sans-serif"
+                      font-size="8.5" fill="#d45a00" font-weight="700">HEATER</text>
+                <text x="59" y="80" text-anchor="middle" font-family="'Segoe UI',sans-serif"
+                      font-size="7" fill="#d45a00" id="svg-power">OFF</text>
+                <!-- Power indicator dot -->
+                <circle id="power-dot" cx="88" cy="56" r="5" fill="#aaa"/>
 
-                <!-- FT-001 -->
-                <circle cx="100" cy="82" r="23" fill="white" stroke="#555" stroke-width="1.5"/>
-                <text x="100" y="79" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="9.5" fill="#333" font-weight="600">FT</text>
-                <text x="100" y="91" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7.5" fill="#999">001</text>
+                <!-- T_hin inlet pipe (cold water entering heater, left) -->
+                <line x1="3" y1="68" x2="18" y2="68" stroke="#4a9eff" stroke-width="4" stroke-linecap="round"/>
+                <line x1="3" y1="68" x2="18" y2="68" stroke="#7fd0ff" stroke-width="2"
+                      stroke-linecap="round" opacity="0.7" class="flow-anim"/>
+                <polygon points="6,64 16,68 6,72" fill="#4a9eff"/>
 
-                <!-- Pipe FT→CV -->
-                <line x1="123" y1="82" x2="158" y2="82" stroke="#666" stroke-width="4" stroke-linecap="round"/>
-                <line id="anim-ftcv" x1="123" y1="82" x2="158" y2="82" stroke="#4a9eff" stroke-width="2"
-                      stroke-linecap="round" opacity="0.5" class="flow-anim"/>
+                <!-- Hot pipe: Heater → HE (T_hout = Tin1) -->
+                <line x1="100" y1="68" x2="160" y2="68" stroke="#ff6b35" stroke-width="4" stroke-linecap="round"/>
+                <line x1="100" y1="68" x2="160" y2="68" stroke="#ffaa7a" stroke-width="2"
+                      stroke-linecap="round" opacity="0.7" class="flow-anim"/>
+                <polygon points="122,64 134,68 122,72" fill="#ff9060" opacity="0.8"/>
 
-                <!-- CV-001 Control Valve (bowtie) -->
-                <!-- Actuator -->
-                <line x1="195" y1="82" x2="195" y2="46" stroke="#666" stroke-width="1.5"/>
-                <line x1="182" y1="46" x2="208" y2="46" stroke="#666" stroke-width="2.5"/>
-                <text x="195" y="40" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7.5" fill="#aaa">CV-001</text>
-                <!-- Left triangle -->
-                <polygon id="cv-left"  points="158,64 158,100 195,82" fill="#e0e0e0" stroke="#555" stroke-width="1.5"/>
-                <!-- Right triangle -->
-                <polygon id="cv-right" points="232,64 232,100 195,82" fill="#e0e0e0" stroke="#555" stroke-width="1.5"/>
+                <!-- ══ HEAT EXCHANGER ══ -->
+                <rect id="he-box" x="160" y="34" width="210" height="98" rx="2"
+                      fill="#fafafa" stroke="#555" stroke-width="1.5"/>
+                <!-- Divider line (hot / cold zones) -->
+                <line x1="160" y1="83" x2="370" y2="83" stroke="#e8e8e8" stroke-width="1" stroke-dasharray="4,3"/>
+                <!-- HE label -->
+                <text x="265" y="80" text-anchor="middle" font-family="'Segoe UI',sans-serif"
+                      font-size="7.5" fill="#c8c8c8" font-weight="600">HE-001</text>
 
-                <!-- Pipe CV→HE -->
-                <line x1="232" y1="82" x2="268" y2="82" stroke="#666" stroke-width="4" stroke-linecap="round"/>
-                <line id="anim-cvhe" x1="232" y1="82" x2="268" y2="82" stroke="#4a9eff" stroke-width="2"
-                      stroke-linecap="round" opacity="0.5" class="flow-anim"/>
+                <!-- Hot coils inside HE (top zone, y=68) -->
+                <polyline points="170,48 182,66 194,48 206,66 218,48 230,66 242,48 254,66 266,48 278,66 290,48 302,66 314,48 326,66 338,48 350,66"
+                          fill="none" stroke="#ffc4a0" stroke-width="1.5" stroke-linejoin="round"/>
+                <!-- Hot flow direction arrow inside HE -->
+                <polygon points="254,62 268,67 254,72" fill="#ff9060" opacity="0.5"/>
 
-                <!-- HE-001 Heat Exchanger -->
-                <rect id="he-box" x="268" y="50" width="132" height="64" rx="2" fill="#fafafa" stroke="#555" stroke-width="1.5"/>
-                <!-- Tube coils inside HE (top row) -->
-                <polyline points="280,63 291,73 302,63 313,73 324,63 335,73 346,63 357,73 368,63 379,73 390,63"
-                          fill="none" stroke="#ddd" stroke-width="1.5" stroke-linejoin="round"/>
-                <!-- Tube coils inside HE (bottom row) -->
-                <polyline points="280,91 291,101 302,91 313,101 324,91 335,101 346,91 357,101 368,91 379,101 390,91"
-                          fill="none" stroke="#ddd" stroke-width="1.5" stroke-linejoin="round"/>
-                <text x="334" y="83" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="8" fill="#c0c0c0" font-weight="600">HE-001</text>
+                <!-- Cold coils inside HE (bottom zone, y=118) -->
+                <polyline points="170,94 182,112 194,94 206,112 218,94 230,112 242,94 254,112 266,94 278,112 290,94 302,112 314,94 326,112 338,94 350,112"
+                          fill="none" stroke="#9fd0ff" stroke-width="1.5" stroke-linejoin="round"/>
+                <!-- Cold flow direction arrow inside HE (right to left) -->
+                <polygon points="276,100 262,105 276,110" fill="#5aaaff" opacity="0.5"/>
 
-                <!-- Pipe HE→TT -->
-                <line x1="400" y1="82" x2="432" y2="82" stroke="#666" stroke-width="4" stroke-linecap="round"/>
-                <line id="anim-hett" x1="400" y1="82" x2="432" y2="82" stroke="#ff6b35" stroke-width="2"
-                      stroke-linecap="round" opacity="0.5" class="flow-anim"/>
+                <!-- Hot outlet pipe: HE → right (Tout1) -->
+                <line x1="370" y1="68" x2="455" y2="68" stroke="#ff6b35" stroke-width="4" stroke-linecap="round"/>
+                <line x1="370" y1="68" x2="455" y2="68" stroke="#ffaa7a" stroke-width="2"
+                      stroke-linecap="round" opacity="0.7" class="flow-anim"/>
+                <polygon points="400,64 412,68 400,72" fill="#ff9060" opacity="0.8"/>
+                <text x="462" y="65" font-family="'Segoe UI',sans-serif" font-size="7.5" fill="#bbb">HOT OUT →</text>
 
-                <!-- TT-001 -->
-                <circle cx="456" cy="82" r="23" fill="white" stroke="#555" stroke-width="1.5"/>
-                <text x="456" y="79" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="9.5" fill="#333" font-weight="600">TT</text>
-                <text x="456" y="91" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7.5" fill="#999">001</text>
+                <!-- Cold inlet pipe: right → HE (Tin2, counter-current) -->
+                <line x1="455" y1="118" x2="370" y2="118" stroke="#4a9eff" stroke-width="4" stroke-linecap="round"/>
+                <line x1="455" y1="118" x2="370" y2="118" stroke="#7fd0ff" stroke-width="2"
+                      stroke-linecap="round" opacity="0.7" class="flow-anim-rev"/>
+                <polygon points="430,114 418,118 430,122" fill="#4a9eff" opacity="0.8"/>
+                <text x="462" y="122" font-family="'Segoe UI',sans-serif" font-size="7.5" fill="#bbb">← COLD IN</text>
 
-                <!-- Pipe after TT (outlet) -->
-                <line x1="479" y1="82" x2="548" y2="82" stroke="#666" stroke-width="4" stroke-linecap="round"/>
-                <line id="anim-out" x1="479" y1="82" x2="548" y2="82" stroke="#ff6b35" stroke-width="2"
-                      stroke-linecap="round" opacity="0.5" class="flow-anim"/>
-                <!-- Arrow outlet -->
-                <polygon points="514,77 526,82 514,87" fill="#999"/>
+                <!-- Cold outlet pipe: HE → left (Tout2) -->
+                <line x1="160" y1="118" x2="100" y2="118" stroke="#4a9eff" stroke-width="4" stroke-linecap="round"/>
+                <line x1="160" y1="118" x2="100" y2="118" stroke="#7fd0ff" stroke-width="2"
+                      stroke-linecap="round" opacity="0.7" class="flow-anim-rev"/>
+                <polygon points="122,114 110,118 122,122" fill="#4a9eff" opacity="0.8"/>
+                <text x="95" y="114" font-family="'Segoe UI',sans-serif" font-size="7.5" fill="#bbb" text-anchor="end">← COLD OUT</text>
 
-                <!-- Feed / Product labels -->
-                <text x="10" y="86" font-family="'Segoe UI',sans-serif" font-size="8" fill="#bbb" text-anchor="end">FEED</text>
-                <text x="553" y="86" font-family="'Segoe UI',sans-serif" font-size="8" fill="#bbb">PROD</text>
+                <!-- F1 flow label inside HE hot zone -->
+                <text x="265" y="63" text-anchor="middle" font-family="'Segoe UI',sans-serif"
+                      font-size="8" fill="#ff9060" font-weight="600" id="svg-F1">F1: -- m³/h</text>
 
-                <!-- ══ LIVE VALUES ══ -->
-                <!-- FT dashed connector + values -->
-                <line x1="100" y1="105" x2="100" y2="118" stroke="#ddd" stroke-width="1" stroke-dasharray="2,2"/>
-                <text x="100" y="129" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="10" fill="#333" id="svg-flow-pv">-- m³/h</text>
-                <text x="100" y="141" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="8" fill="#bbb">SP: <tspan id="svg-flow-sp">--</tspan></text>
+                <!-- F2 flow label inside HE cold zone -->
+                <text x="265" y="113" text-anchor="middle" font-family="'Segoe UI',sans-serif"
+                      font-size="8" fill="#5aaaff" font-weight="600" id="svg-F2">F2: -- m³/h</text>
 
-                <!-- CV state -->
-                <line x1="195" y1="105" x2="195" y2="118" stroke="#ddd" stroke-width="1" stroke-dasharray="2,2"/>
-                <text x="195" y="129" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="10" fill="#333" id="svg-valve-pv">--</text>
-                <text x="195" y="141" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7.5" fill="#bbb" id="svg-valve-pct">--</text>
+                <!-- ══ LIVE VALUE LABELS ══ -->
 
-                <!-- TT dashed connector + values -->
-                <line x1="456" y1="105" x2="456" y2="118" stroke="#ddd" stroke-width="1" stroke-dasharray="2,2"/>
-                <text x="456" y="129" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="10" fill="#333" id="svg-temp-pv">-- °C</text>
-                <text x="456" y="141" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="8" fill="#bbb">SP: <tspan id="svg-temp-sp">--</tspan> °C</text>
+                <!-- T_hin (below heater inlet) -->
+                <line x1="11" y1="68" x2="11" y2="84" stroke="#ddd" stroke-width="1" stroke-dasharray="2,2"/>
+                <text x="11" y="93" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7" fill="#888">T_hin</text>
+                <text x="11" y="104" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="10" fill="#333" id="svg-T_hin">-- °C</text>
+
+                <!-- T_hout / Tin1 (above hot pipe between heater and HE) -->
+                <line x1="130" y1="68" x2="130" y2="52" stroke="#ddd" stroke-width="1" stroke-dasharray="2,2"/>
+                <text x="130" y="47" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7" fill="#888">T_hout / Tin1</text>
+                <text x="130" y="37" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="10" fill="#333" id="svg-T_hout">-- °C</text>
+
+                <!-- Tout1 (above hot outlet pipe) -->
+                <line x1="410" y1="68" x2="410" y2="52" stroke="#ddd" stroke-width="1" stroke-dasharray="2,2"/>
+                <text x="410" y="47" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7" fill="#888">Tout1</text>
+                <text x="410" y="37" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="10" fill="#333" id="svg-Tout1">-- °C</text>
+
+                <!-- Tin2 (below cold inlet pipe) -->
+                <line x1="415" y1="118" x2="415" y2="134" stroke="#ddd" stroke-width="1" stroke-dasharray="2,2"/>
+                <text x="415" y="143" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7" fill="#888">Tin2</text>
+                <text x="415" y="155" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="10" fill="#333" id="svg-Tin2">-- °C</text>
+
+                <!-- Tout2 (below cold outlet pipe) -->
+                <line x1="128" y1="118" x2="128" y2="134" stroke="#ddd" stroke-width="1" stroke-dasharray="2,2"/>
+                <text x="128" y="143" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="7" fill="#888">Tout2</text>
+                <text x="128" y="155" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="10" fill="#333" id="svg-Tout2">-- °C</text>
+
             </svg>
             </div>
         </div>
@@ -886,43 +910,35 @@ function renderAlarmLog() {
 }
 
 // ════════════════════════════════════════════════════
-// P&ID SVG UPDATE
+// P&ID SVG UPDATE — driven by process_tags event
 // ════════════════════════════════════════════════════
 function updateSVG(d) {
-    const flowVal  = typeof d.flow_rate   === 'number' ? d.flow_rate.toFixed(1)    : '--';
-    const tempVal  = typeof d.temperature === 'number' ? d.temperature.toFixed(1)  : '--';
-    const spf      = typeof d.setpoint_flow === 'number' ? d.setpoint_flow.toFixed(1) : '--';
-    const spt      = typeof d.setpoint_temp === 'number' ? d.setpoint_temp.toFixed(1) : '--';
-    document.getElementById('svg-flow-pv').textContent  = flowVal + ' m³/h';
-    document.getElementById('svg-flow-sp').textContent  = spf;
-    document.getElementById('svg-temp-pv').textContent  = tempVal + ' °C';
-    document.getElementById('svg-temp-sp').textContent  = spt;
-    document.getElementById('svg-valve-pv').textContent = d.valve_state || '--';
+    function fmt(v, dec) { return typeof v === 'number' ? v.toFixed(dec ?? 1) + ' °C' : '-- °C'; }
+    function fmtF(v)     { return typeof v === 'number' ? 'F1: ' + v.toFixed(2) + ' m³/h' : 'F1: -- m³/h'; }
+    function fmtF2(v)    { return typeof v === 'number' ? 'F2: ' + v.toFixed(2) + ' m³/h' : 'F2: -- m³/h'; }
 
-    // Valve color
-    const vc = { OPEN:'#2a7a2a', PARTIAL:'#c47200', CLOSED:'#c00' };
-    const vc2 = { OPEN:'rgba(42,122,42,0.12)', PARTIAL:'rgba(196,114,0,0.12)', CLOSED:'rgba(204,0,0,0.12)' };
-    const fill = vc[d.valve_state] || '#e0e0e0';
-    const fill2 = vc2[d.valve_state] || '#e0e0e0';
-    document.getElementById('cv-left').setAttribute('fill',  fill2);
-    document.getElementById('cv-right').setAttribute('fill', fill2);
-    document.getElementById('cv-left').setAttribute('stroke',  fill);
-    document.getElementById('cv-right').setAttribute('stroke', fill);
-    document.getElementById('svg-valve-pv').setAttribute('fill', fill);
+    const el = id => document.getElementById(id);
+    if (el('svg-T_hin'))  el('svg-T_hin').textContent  = fmt(d.T_hin);
+    if (el('svg-T_hout')) el('svg-T_hout').textContent = fmt(d.T_hout);
+    if (el('svg-Tout1'))  el('svg-Tout1').textContent  = fmt(d.Tout1_wymiennik1);
+    if (el('svg-Tin2'))   el('svg-Tin2').textContent   = fmt(d.Tin2_wymiennik1);
+    if (el('svg-Tout2'))  el('svg-Tout2').textContent  = fmt(d.Tout2_wymiennik1);
+    if (el('svg-F1'))     el('svg-F1').textContent     = fmtF(d.F1);
+    if (el('svg-F2'))     el('svg-F2').textContent     = fmtF2(d.F2);
 
-    // HE box color (blue→orange based on temperature / setpoint ratio)
-    const ratio = d.setpoint_temp > 0 ? Math.min(1, Math.max(0, (d.temperature - 20) / (d.setpoint_temp - 20 || 1))) : 0;
+    // Power indicator
+    const on = d.power === true || d.power === 1;
+    if (el('power-dot'))  el('power-dot').setAttribute('fill', on ? '#4caf50' : '#aaa');
+    if (el('svg-power'))  el('svg-power').textContent = on ? 'ON' : 'OFF';
+
+    // HE box color: blue (cold) → orange (hot) based on average exchanger temp
+    const avgT = ((d.Tin1_wymiennik1 || 0) + (d.Tout1_wymiennik1 || 0)) / 2;
+    const ratio = Math.min(1, Math.max(0, (avgT - 20) / 180));
     const r = Math.round(255 * ratio), b = Math.round(200 * (1 - ratio));
-    document.getElementById('he-box').setAttribute('fill', `rgba(${r},${Math.round(r*0.3)},${b},0.08)`);
-
-    // Flow animation visibility
-    const hasFlow = (d.flow_rate || 0) > 0.1;
-    const anims = ['anim-feed','anim-ftcv','anim-cvhe','anim-hett','anim-out'];
-    anims.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.style.display = hasFlow ? '' : 'none';
-    });
+    if (el('he-box')) el('he-box').setAttribute('fill', `rgba(${r},${Math.round(r*0.3)},${b},0.07)`);
 }
+
+socket.on('process_tags', d => { updateSVG(d); });
 
 // ════════════════════════════════════════════════════
 // VALVE CARD UPDATE
