@@ -246,12 +246,32 @@ def process_page():
                            openpipe_available=openpipe.is_available())
 
 
+@app.route("/schema")
+def schema_page():
+    return render_template("schema.html")
+
+
 @app.route("/api/process/data")
 def process_data():
     """JSON endpoint — all 21 WinCC Unified tags."""
     data = openpipe.read_all_tags()
     data["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
     return jsonify(data)
+
+
+@app.route("/api/process/write", methods=["POST"])
+def process_write():
+    """Write a writable tag (F1_SP, F2_SP) via Open Pipe."""
+    data = request.get_json(force=True)
+    tag   = data.get("tag", "")
+    value = data.get("value")
+    if tag not in ("F1_SP", "F2_SP"):
+        return jsonify({"ok": False, "error": "Only F1_SP and F2_SP are writable"}), 400
+    try:
+        ok = openpipe.write_tag(tag, float(value))
+        return jsonify({"ok": ok, "tag": tag, "value": value})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @app.route("/health")

@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synoptique — Procédé thermique</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html, body {
+            width: 100vw; height: 100vh;
+            overflow: hidden;
+            font-family: "Segoe UI", system-ui, sans-serif;
+            background: #f0f0f0;
+            color: #1a1a1a;
+        }
+
+        .page {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding: 5px;
+            gap: 5px;
+        }
+
+        /* ── Header ── */
+        .hdr {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 10px;
+            background: #1a1a1a;
+            color: #fff;
+            flex-shrink: 0;
+        }
+        .hdr-left  { display: flex; align-items: center; gap: 14px; }
+        .hdr-title { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+        .hdr-right { display: flex; align-items: center; gap: 12px; font-size: 0.65rem; color: #aaa; }
+        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+        .dot.ok  { background: #4caf50; }
+        .dot.sim { background: #ff9800; }
+        .dot.err { background: #f44336; }
+
+        .nav { display: flex; gap: 3px; }
+        .nav-a {
+            padding: 2px 9px;
+            font-size: 0.6rem; letter-spacing: 0.07em; text-transform: uppercase;
+            border: 1px solid #444; color: #888; text-decoration: none;
+        }
+        .nav-a:hover  { border-color: #aaa; color: #ccc; }
+        .nav-a.active { background: #fff; color: #1a1a1a; border-color: #fff; }
+
+        /* ── Schematic area ── */
+        .svg-wrap {
+            flex: 1;
+            background: #fff;
+            border: 1px solid #ddd;
+            min-height: 0;
+            display: flex;
+            align-items: stretch;
+        }
+        .svg-wrap svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* ── Setpoint bar ── */
+        .sp-bar {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
+            flex-shrink: 0;
+        }
+
+        .sp-card {
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 5px 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .sp-label {
+            font-size: 0.6rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #888;
+            flex-shrink: 0;
+            width: 60px;
+        }
+        .sp-ctrl {
+            display: flex;
+            align-items: stretch;
+            height: 42px;
+            border: 1px solid #ccc;
+            flex: 1;
+        }
+        .sp-btn {
+            width: 52px;
+            background: #1a1a1a;
+            color: #fff;
+            border: none;
+            font-size: 1.3rem;
+            font-weight: 700;
+            cursor: pointer;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: manipulation;
+            user-select: none;
+        }
+        .sp-btn:active { background: #444; }
+        .sp-val {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            font-size: 1.3rem;
+            font-weight: 300;
+            font-variant-numeric: tabular-nums;
+            background: #fafafa;
+            border-left: 1px solid #ccc;
+            border-right: 1px solid #ccc;
+        }
+        .sp-unit { font-size: 0.65rem; color: #aaa; padding-bottom: 8px; align-self: flex-end; }
+        .sp-fb {
+            font-size: 0.58rem;
+            color: #aaa;
+            flex-shrink: 0;
+            width: 50px;
+        }
+        .sp-fb.ok  { color: #2a7a2a; }
+        .sp-fb.err { color: #c00; }
+
+        /* ── SVG flow animations ── */
+        .flow-hot {
+            stroke-dasharray: 12 6;
+            animation: flow-fwd 1s linear infinite;
+        }
+        .flow-cold-rev {
+            stroke-dasharray: 12 6;
+            animation: flow-rev 1s linear infinite;
+        }
+        @keyframes flow-fwd { to { stroke-dashoffset: -18; } }
+        @keyframes flow-rev { to { stroke-dashoffset:  18; } }
+    </style>
+</head>
+<body>
+<div class="page">
+
+    <!-- Header -->
+    <div class="hdr">
+        <div class="hdr-left">
+            <span class="hdr-title">Synoptique — Procédé thermique</span>
+            <nav class="nav">
+                <a href="/"       class="nav-a">Monitor</a>
+                <a href="/test"   class="nav-a">Test DB</a>
+                <a href="/process" class="nav-a">Process</a>
+                <a href="/schema" class="nav-a active">Synoptique</a>
+            </nav>
+        </div>
+        <div class="hdr-right">
+            <span><span class="dot" id="srcDot"></span><span id="srcLabel">--</span></span>
+            <span id="lastTs">--:--:--</span>
+        </div>
+    </div>
+
+    <!-- SVG Schematic -->
+    <div class="svg-wrap">
+    <svg viewBox="0 0 760 295" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"
+         font-family="'Segoe UI',system-ui,sans-serif">
+
+        <!-- ═══════════════════════════════════════════
+             HEATER
+        ═══════════════════════════════════════════ -->
+        <rect id="heater-box" x="48" y="108" width="110" height="78" rx="3"
+              fill="#fff8f0" stroke="#d45a00" stroke-width="2.5"/>
+        <!-- Heater label -->
+        <text x="103" y="142" text-anchor="middle" font-size="13" fill="#d45a00" font-weight="700">HEATER</text>
+        <!-- Power indicator -->
+        <circle id="pw-dot" cx="142" cy="117" r="7" fill="#bbb"/>
+        <text id="pw-txt" x="103" y="160" text-anchor="middle" font-size="10" fill="#d45a00">OFF</text>
+
+        <!-- ═══════════════════════════════════════════
+             HOT FLOW (y = 135) orange  left → right
+        ═══════════════════════════════════════════ -->
+
+        <!-- T_hin inlet pipe (left of heater) -->
+        <line x1="6"  y1="135" x2="48"  y2="135" stroke="#4a9eff" stroke-width="5" stroke-linecap="round"/>
+        <line x1="6"  y1="135" x2="48"  y2="135" stroke="#8dccff" stroke-width="2.5"
+              stroke-linecap="round" opacity="0.8" class="flow-hot"/>
+        <polygon points="10,130 26,135 10,140" fill="#4a9eff"/>
+
+        <!-- Connecting pipe: Heater → HE (T_hout = Tin1) -->
+        <line x1="158" y1="135" x2="232" y2="135" stroke="#ff6b35" stroke-width="5" stroke-linecap="round"/>
+        <line x1="158" y1="135" x2="232" y2="135" stroke="#ffa070" stroke-width="2.5"
+              stroke-linecap="round" opacity="0.8" class="flow-hot"/>
+        <polygon points="170,130 186,135 170,140" fill="#ff9060"/>
+
+        <!-- ═══════════════════════════════════════════
+             HEAT EXCHANGER
+        ═══════════════════════════════════════════ -->
+        <rect id="he-box" x="232" y="80" width="286" height="188" rx="3"
+              fill="#fafafa" stroke="#555" stroke-width="2"/>
+
+        <!-- HE label -->
+        <text x="375" y="99" text-anchor="middle" font-size="9" fill="#bbb" font-weight="700"
+              letter-spacing="0.1em">ÉCHANGEUR THERMIQUE — HE-001</text>
+
+        <!-- Divider hot / cold -->
+        <line x1="232" y1="174" x2="518" y2="174" stroke="#e0e0e0" stroke-width="1.5" stroke-dasharray="5,4"/>
+
+        <!-- Hot coils (top zone) -->
+        <polyline points="244,110 258,132 272,110 286,132 300,110 314,132 328,110 342,132
+                          356,110 370,132 384,110 398,132 412,110 426,132 440,110 454,132 468,110 482,132 496,110"
+                  fill="none" stroke="#ffc4a0" stroke-width="2" stroke-linejoin="round"/>
+        <!-- Hot flow direction inside HE -->
+        <polygon points="350,128 366,134 350,140" fill="#ff9060" opacity="0.6"/>
+
+        <!-- Cold coils (bottom zone) -->
+        <polyline points="244,182 258,204 272,182 286,204 300,182 314,204 328,182 342,204
+                          356,182 370,204 384,182 398,204 412,182 426,204 440,182 454,204 468,182 482,204 496,182"
+                  fill="none" stroke="#9fd0ff" stroke-width="2" stroke-linejoin="round"/>
+        <!-- Cold flow direction inside HE (right to left) -->
+        <polygon points="400,198 384,204 400,210" fill="#5aaaff" opacity="0.6"/>
+
+        <!-- F1 flow label inside HE hot zone -->
+        <text x="375" y="156" text-anchor="middle" font-size="11" fill="#ff7a40"
+              font-weight="600" id="sv-F1">F1 : -- m³/h</text>
+
+        <!-- F2 flow label inside HE cold zone -->
+        <text x="375" y="258" text-anchor="middle" font-size="11" fill="#3a9eff"
+              font-weight="600" id="sv-F2">F2 : -- m³/h</text>
+
+        <!-- ═══════════════════════════════════════════
+             HOT OUTLET (Tout1)  right of HE
+        ═══════════════════════════════════════════ -->
+        <line x1="518" y1="135" x2="614" y2="135" stroke="#ff6b35" stroke-width="5" stroke-linecap="round"/>
+        <line x1="518" y1="135" x2="614" y2="135" stroke="#ffa070" stroke-width="2.5"
+              stroke-linecap="round" opacity="0.8" class="flow-hot"/>
+        <polygon points="546,130 562,135 546,140" fill="#ff9060"/>
+        <text x="622" y="131" font-size="9" fill="#bbb">HOT</text>
+        <text x="622" y="143" font-size="9" fill="#bbb">OUT →</text>
+
+        <!-- ═══════════════════════════════════════════
+             COLD INLET (Tin2)  right of HE, counter-current
+        ═══════════════════════════════════════════ -->
+        <line x1="614" y1="213" x2="518" y2="213" stroke="#4a9eff" stroke-width="5" stroke-linecap="round"/>
+        <line x1="614" y1="213" x2="518" y2="213" stroke="#8dccff" stroke-width="2.5"
+              stroke-linecap="round" opacity="0.8" class="flow-cold-rev"/>
+        <polygon points="590,208 574,213 590,218" fill="#4a9eff"/>
+        <text x="622" y="209" font-size="9" fill="#bbb">← COLD</text>
+        <text x="622" y="221" font-size="9" fill="#bbb">IN</text>
+
+        <!-- ═══════════════════════════════════════════
+             COLD OUTLET (Tout2)  left of HE
+        ═══════════════════════════════════════════ -->
+        <line x1="232" y1="213" x2="158" y2="213" stroke="#4a9eff" stroke-width="5" stroke-linecap="round"/>
+        <line x1="232" y1="213" x2="158" y2="213" stroke="#8dccff" stroke-width="2.5"
+              stroke-linecap="round" opacity="0.8" class="flow-cold-rev"/>
+        <polygon points="185,208 169,213 185,218" fill="#4a9eff"/>
+        <text x="148" y="211" font-size="9" fill="#bbb" text-anchor="end">← COLD OUT</text>
+
+        <!-- ═══════════════════════════════════════════
+             VALUE CARDS
+        ═══════════════════════════════════════════ -->
+
+        <!-- T_hin card (below inlet, left) -->
+        <line x1="27" y1="135" x2="27" y2="188" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>
+        <rect x="2"  y="188" width="90" height="52" rx="3" fill="white" stroke="#e0e0e0" stroke-width="1.5"/>
+        <text x="47" y="203" text-anchor="middle" font-size="8.5" fill="#aaa" letter-spacing="0.05em">T_hin</text>
+        <text x="47" y="228" text-anchor="middle" font-size="18" fill="#1a1a1a"
+              font-weight="300" id="sv-T_hin">-- °C</text>
+
+        <!-- T_hout / Tin1 card (above connecting pipe) -->
+        <line x1="195" y1="135" x2="195" y2="80" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>
+        <rect x="152" y="28" width="114" height="52" rx="3" fill="white" stroke="#e0e0e0" stroke-width="1.5"/>
+        <text x="209" y="43" text-anchor="middle" font-size="8.5" fill="#aaa" letter-spacing="0.05em">T_hout · Tin1</text>
+        <text x="209" y="68" text-anchor="middle" font-size="18" fill="#1a1a1a"
+              font-weight="300" id="sv-T_hout">-- °C</text>
+
+        <!-- Tout1 card (above hot outlet) -->
+        <line x1="566" y1="135" x2="566" y2="80" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>
+        <rect x="524" y="28" width="90" height="52" rx="3" fill="white" stroke="#e0e0e0" stroke-width="1.5"/>
+        <text x="569" y="43" text-anchor="middle" font-size="8.5" fill="#aaa" letter-spacing="0.05em">Tout1</text>
+        <text x="569" y="68" text-anchor="middle" font-size="18" fill="#1a1a1a"
+              font-weight="300" id="sv-Tout1">-- °C</text>
+
+        <!-- Tin2 card (below cold inlet) -->
+        <line x1="566" y1="213" x2="566" y2="240" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>
+        <rect x="524" y="240" width="90" height="52" rx="3" fill="white" stroke="#e0e0e0" stroke-width="1.5"/>
+        <text x="569" y="255" text-anchor="middle" font-size="8.5" fill="#aaa" letter-spacing="0.05em">Tin2</text>
+        <text x="569" y="280" text-anchor="middle" font-size="18" fill="#1a1a1a"
+              font-weight="300" id="sv-Tin2">-- °C</text>
+
+        <!-- Tout2 card (below cold outlet) -->
+        <line x1="195" y1="213" x2="195" y2="240" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>
+        <rect x="152" y="240" width="90" height="52" rx="3" fill="white" stroke="#e0e0e0" stroke-width="1.5"/>
+        <text x="197" y="255" text-anchor="middle" font-size="8.5" fill="#aaa" letter-spacing="0.05em">Tout2</text>
+        <text x="197" y="280" text-anchor="middle" font-size="18" fill="#1a1a1a"
+              font-weight="300" id="sv-Tout2">-- °C</text>
+
+        <!-- ═══════════════════════════════════════════
+             VALVE INDICATORS
+        ═══════════════════════════════════════════ -->
+
+        <!-- Zawor_F1 on hot connecting pipe -->
+        <rect id="zf1-bg" x="172" y="122" width="46" height="26" rx="2" fill="#e8e8e8"/>
+        <text x="195" y="130" text-anchor="middle" font-size="7" fill="#888">Zawor F1</text>
+        <text id="sv-ZF1" x="195" y="143" text-anchor="middle" font-size="10"
+              fill="#555" font-weight="600">--</text>
+
+        <!-- Zawor_F2 on cold inlet pipe -->
+        <rect id="zf2-bg" x="530" y="200" width="46" height="26" rx="2" fill="#e8e8e8"/>
+        <text x="553" y="208" text-anchor="middle" font-size="7" fill="#888">Zawor F2</text>
+        <text id="sv-ZF2" x="553" y="221" text-anchor="middle" font-size="10"
+              fill="#555" font-weight="600">--</text>
+
+    </svg>
+    </div>
+
+    <!-- Setpoint bar -->
+    <div class="sp-bar">
+
+        <!-- F1_SP -->
+        <div class="sp-card">
+            <div class="sp-label">Consigne<br>F1_SP</div>
+            <div class="sp-ctrl">
+                <button class="sp-btn"
+                        onpointerdown="startRpt('F1_SP',-0.1)"
+                        onpointerup="stopRpt()" onpointerleave="stopRpt()" onpointercancel="stopRpt()">‹</button>
+                <div class="sp-val">
+                    <span id="sp-F1-val">--</span>
+                    <span class="sp-unit">m³/h</span>
+                </div>
+                <button class="sp-btn"
+                        onpointerdown="startRpt('F1_SP', 0.1)"
+                        onpointerup="stopRpt()" onpointerleave="stopRpt()" onpointercancel="stopRpt()">›</button>
+            </div>
+            <div class="sp-fb" id="fb-F1"></div>
+        </div>
+
+        <!-- F2_SP -->
+        <div class="sp-card">
+            <div class="sp-label">Consigne<br>F2_SP</div>
+            <div class="sp-ctrl">
+                <button class="sp-btn"
+                        onpointerdown="startRpt('F2_SP',-0.1)"
+                        onpointerup="stopRpt()" onpointerleave="stopRpt()" onpointercancel="stopRpt()">‹</button>
+                <div class="sp-val">
+                    <span id="sp-F2-val">--</span>
+                    <span class="sp-unit">m³/h</span>
+                </div>
+                <button class="sp-btn"
+                        onpointerdown="startRpt('F2_SP', 0.1)"
+                        onpointerup="stopRpt()" onpointerleave="stopRpt()" onpointercancel="stopRpt()">›</button>
+            </div>
+            <div class="sp-fb" id="fb-F2"></div>
+        </div>
+
+    </div>
+
+</div><!-- /page -->
+
+<script>
+// ── In-memory setpoints (updated from live data) ─────────────────────────────
+const sp = { F1_SP: 3.0, F2_SP: 2.0 };
+
+// ── Socket.IO ────────────────────────────────────────────────────────────────
+const socket = io();
+
+socket.on('process_tags', applyData);
+
+fetch('/api/process/data').then(r => r.json()).then(applyData).catch(() => {});
+
+function applyData(d) {
+    function fmtT(v) { return typeof v === 'number' ? v.toFixed(1) + ' °C' : '-- °C'; }
+    function fmtF(v, lbl) {
+        return typeof v === 'number' ? lbl + ' : ' + v.toFixed(2) + ' m³/h' : lbl + ' : -- m³/h';
+    }
+
+    setText('sv-T_hin',  fmtT(d.T_hin));
+    setText('sv-T_hout', fmtT(d.T_hout));
+    setText('sv-Tout1',  fmtT(d.Tout1_wymiennik1));
+    setText('sv-Tin2',   fmtT(d.Tin2_wymiennik1));
+    setText('sv-Tout2',  fmtT(d.Tout2_wymiennik1));
+    setText('sv-F1',     fmtF(d.F1,  'F1'));
+    setText('sv-F2',     fmtF(d.F2,  'F2'));
+
+    // Setpoint display (don't overwrite user-in-progress edits)
+    if (typeof d.F1_SP === 'number') { sp.F1_SP = d.F1_SP; setText('sp-F1-val', d.F1_SP.toFixed(2)); }
+    if (typeof d.F2_SP === 'number') { sp.F2_SP = d.F2_SP; setText('sp-F2-val', d.F2_SP.toFixed(2)); }
+
+    // Valve states
+    const VALVE = { 0:'CLOSED', 1:'OPEN', 2:'PARTIAL' };
+    const VALVE_COLOR = { OPEN:'#2e7d32', PARTIAL:'#e65100', CLOSED:'#c62828', UNKNOWN:'#888' };
+    const vf1 = VALVE[d.Zawor_F1] ?? 'UNKNOWN';
+    const vf2 = VALVE[d.Zawor_F2] ?? 'UNKNOWN';
+    setText('sv-ZF1', vf1);
+    setText('sv-ZF2', vf2);
+    setAttr('sv-ZF1', 'fill', VALVE_COLOR[vf1] || '#888');
+    setAttr('sv-ZF2', 'fill', VALVE_COLOR[vf2] || '#888');
+    setAttr('zf1-bg', 'fill', (vf1 === 'OPEN') ? 'rgba(46,125,50,0.1)' : (vf1 === 'PARTIAL') ? 'rgba(230,81,0,0.1)' : '#f0f0f0');
+    setAttr('zf2-bg', 'fill', (vf2 === 'OPEN') ? 'rgba(46,125,50,0.1)' : (vf2 === 'PARTIAL') ? 'rgba(230,81,0,0.1)' : '#f0f0f0');
+
+    // Power
+    const on = d.power === true || d.power === 1;
+    setText('pw-txt', on ? 'ON' : 'OFF');
+    setAttr('pw-dot', 'fill', on ? '#4caf50' : '#bbb');
+    setAttr('heater-box', 'fill', on ? '#fff3e0' : '#fff8f0');
+
+    // HE color (hot avg temp → orange tint)
+    const avgT = ((d.Tin1_wymiennik1 || 0) + (d.Tout1_wymiennik1 || 0)) / 2;
+    const ratio = Math.min(1, Math.max(0, (avgT - 20) / 180));
+    const r = Math.round(255 * ratio), b = Math.round(200 * (1 - ratio));
+    setAttr('he-box', 'fill', `rgba(${r},${Math.round(r*0.3)},${b},0.06)`);
+
+    // Source indicator
+    const src = d.source || 'UNKNOWN';
+    setText('srcLabel', src);
+    setAttr('srcDot', 'class', 'dot ' + (src === 'OPENPIPE' ? 'ok' : src === 'SIMULATION' ? 'sim' : 'err'));
+    setText('lastTs', new Date().toLocaleTimeString());
+}
+
+function setText(id, val) { const e = document.getElementById(id); if (e) e.textContent = val; }
+function setAttr(id, attr, val) { const e = document.getElementById(id); if (e) e.setAttribute(attr, val); }
+
+// ── Setpoint control ─────────────────────────────────────────────────────────
+let _rptTimer = null;
+let _rptFast  = null;
+
+function startRpt(tag, delta) {
+    applyDelta(tag, delta);
+    _rptTimer = setTimeout(() => {
+        _rptFast = setInterval(() => applyDelta(tag, delta), 80);
+    }, 400);
+}
+
+function stopRpt() {
+    clearTimeout(_rptTimer);
+    clearInterval(_rptFast);
+    _rptTimer = null; _rptFast = null;
+}
+
+function applyDelta(tag, delta) {
+    sp[tag] = Math.max(0, Math.round((sp[tag] + delta) * 100) / 100);
+    setText(tag === 'F1_SP' ? 'sp-F1-val' : 'sp-F2-val', sp[tag].toFixed(2));
+    writeTag(tag, sp[tag]);
+}
+
+let _writeDebounce = {};
+
+function writeTag(tag, value) {
+    clearTimeout(_writeDebounce[tag]);
+    _writeDebounce[tag] = setTimeout(() => {
+        fetch('/api/process/write', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tag, value })
+        })
+        .then(r => r.json())
+        .then(d => {
+            const fbId = tag === 'F1_SP' ? 'fb-F1' : 'fb-F2';
+            const el = document.getElementById(fbId);
+            if (el) {
+                el.textContent = d.ok ? '✓' : '✗ ' + (d.error || '');
+                el.className = 'sp-fb ' + (d.ok ? 'ok' : 'err');
+                setTimeout(() => { el.textContent = ''; el.className = 'sp-fb'; }, 2000);
+            }
+        })
+        .catch(() => {});
+    }, 200);
+}
+</script>
+</body>
+</html>
