@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Process — WinCC Tags</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html, body {
+            width: 100vw; height: 100vh;
+            overflow: hidden;
+            font-family: "Segoe UI", system-ui, sans-serif;
+            background: #f0f0f0;
+            color: #1a1a1a;
+            font-size: 13px;
+        }
+
+        .page {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding: 6px;
+            gap: 5px;
+        }
+
+        /* ── Header ── */
+        .hdr {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 8px;
+            background: #1a1a1a;
+            color: #fff;
+            flex-shrink: 0;
+        }
+        .hdr-title { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+        .hdr-right { display: flex; align-items: center; gap: 12px; font-size: 0.68rem; color: #aaa; }
+        .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
+        .dot.ok     { background: #4caf50; }
+        .dot.err    { background: #f44336; }
+        .dot.sim    { background: #ff9800; }
+
+        /* ── Nav ── */
+        .nav { display: flex; gap: 3px; }
+        .nav-a {
+            font-size: 0.65rem; letter-spacing: 0.07em; text-transform: uppercase;
+            padding: 2px 8px; border: 1px solid #555; color: #aaa;
+            text-decoration: none;
+        }
+        .nav-a:hover { border-color: #fff; color: #fff; }
+        .nav-a.active { background: #fff; color: #1a1a1a; border-color: #fff; }
+
+        /* ── Sections ── */
+        .sections {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .section {
+            background: #fff;
+            border: 1px solid #ddd;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .section-title {
+            font-size: 0.62rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            font-weight: 700;
+            padding: 5px 8px;
+            background: #1a1a1a;
+            color: #fff;
+            flex-shrink: 0;
+        }
+
+        .section-body {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            padding: 5px;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        /* ── Tag card ── */
+        .tag-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 5px 8px;
+            background: #f8f8f8;
+            border: 1px solid #e8e8e8;
+            gap: 8px;
+        }
+
+        .tag-info { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+        .tag-name {
+            font-size: 0.72rem; font-weight: 600; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+        }
+        .tag-meta { font-size: 0.58rem; color: #888; letter-spacing: 0.04em; }
+
+        .tag-value {
+            font-size: 0.95rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            text-align: right;
+            white-space: nowrap;
+            min-width: 70px;
+        }
+
+        .tag-value.bool-true  { color: #2e7d32; }
+        .tag-value.bool-false { color: #c62828; }
+        .tag-value.valve-open    { color: #2e7d32; }
+        .tag-value.valve-partial { color: #e65100; }
+        .tag-value.valve-closed  { color: #c62828; }
+
+        .tag-unit {
+            font-size: 0.6rem; color: #aaa; text-align: right;
+            white-space: nowrap; min-width: 28px;
+        }
+
+        /* ── Footer ── */
+        .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 3px 8px;
+            background: #e8e8e8;
+            font-size: 0.62rem;
+            color: #888;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+
+    <!-- Header -->
+    <div class="hdr">
+        <div>
+            <div class="hdr-title">Process — WinCC Tags</div>
+            <nav class="nav" style="margin-top:4px;">
+                <a href="/" class="nav-a">Monitor</a>
+                <a href="/test" class="nav-a">Test DB</a>
+                <a href="/process" class="nav-a active">Process</a>
+            </nav>
+        </div>
+        <div class="hdr-right">
+            <span>
+                <span class="dot" id="srcDot"></span>
+                <span id="srcLabel">--</span>
+            </span>
+            <span id="lastUpdate">--</span>
+        </div>
+    </div>
+
+    <!-- Sections -->
+    <div class="sections">
+
+        <!-- Four (Furnace) -->
+        <div class="section">
+            <div class="section-title">Four</div>
+            <div class="section-body">
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">T_hin</div>
+                        <div class="tag-meta">Real · %MD16</div>
+                    </div>
+                    <div class="tag-value" id="v-T_hin">--</div>
+                    <div class="tag-unit">°C</div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">T_hout</div>
+                        <div class="tag-meta">Real · %MD12</div>
+                    </div>
+                    <div class="tag-value" id="v-T_hout">--</div>
+                    <div class="tag-unit">°C</div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">T_we_piec_skal</div>
+                        <div class="tag-meta">Int · %IW300</div>
+                    </div>
+                    <div class="tag-value" id="v-T_we_piec_skal">--</div>
+                    <div class="tag-unit"></div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">T_wy_PIEC_skal</div>
+                        <div class="tag-meta">Int · %IW304</div>
+                    </div>
+                    <div class="tag-value" id="v-T_wy_PIEC_skal">--</div>
+                    <div class="tag-unit"></div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">power</div>
+                        <div class="tag-meta">Bool · %Q0.3</div>
+                    </div>
+                    <div class="tag-value" id="v-power">--</div>
+                    <div class="tag-unit"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Échangeur 1 -->
+        <div class="section">
+            <div class="section-title">Échangeur 1</div>
+            <div class="section-body">
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">Tin1_wymiennik1</div>
+                        <div class="tag-meta">Real · %MD48</div>
+                    </div>
+                    <div class="tag-value" id="v-Tin1_wymiennik1">--</div>
+                    <div class="tag-unit">°C</div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">Tout1_wymiennik1</div>
+                        <div class="tag-meta">Real · %MD44</div>
+                    </div>
+                    <div class="tag-value" id="v-Tout1_wymiennik1">--</div>
+                    <div class="tag-unit">°C</div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">Tin1_wymiennik1_skal</div>
+                        <div class="tag-meta">Int · %IW112</div>
+                    </div>
+                    <div class="tag-value" id="v-Tin1_wymiennik1_skal">--</div>
+                    <div class="tag-unit"></div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">Tout1_wymiennik1_skal</div>
+                        <div class="tag-meta">Int · %IW120</div>
+                    </div>
+                    <div class="tag-value" id="v-Tout1_wymiennik1_skal">--</div>
+                    <div class="tag-unit"></div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">F1</div>
+                        <div class="tag-meta">Real · %MD28</div>
+                    </div>
+                    <div class="tag-value" id="v-F1">--</div>
+                    <div class="tag-unit">m³/h</div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">F1_SP</div>
+                        <div class="tag-meta">Real · %MD24</div>
+                    </div>
+                    <div class="tag-value" id="v-F1_SP">--</div>
+                    <div class="tag-unit">m³/h</div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">F1_skal</div>
+                        <div class="tag-meta">Int · %IW316</div>
+                    </div>
+                    <div class="tag-value" id="v-F1_skal">--</div>
+                    <div class="tag-unit"></div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">Zawor_F1</div>
+                        <div class="tag-meta">Word · %QW8</div>
+                    </div>
+                    <div class="tag-value" id="v-Zawor_F1">--</div>
+                    <div class="tag-unit"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Échangeur 2 -->
+        <div class="section">
+            <div class="section-title">Échangeur 2</div>
+            <div class="section-body">
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">Tin2_wymiennik1</div>
+                        <div class="tag-meta">Real · %MD40</div>
+                    </div>
+                    <div class="tag-value" id="v-Tin2_wymiennik1">--</div>
+                    <div class="tag-unit">°C</div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">Tout2_wymiennik1</div>
+                        <div class="tag-meta">Real · %MD52</div>
+                    </div>
+                    <div class="tag-value" id="v-Tout2_wymiennik1">--</div>
+                    <div class="tag-unit">°C</div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">Tin2_wymiennik1_skal</div>
+                        <div class="tag-meta">Int · %IW116</div>
+                    </div>
+                    <div class="tag-value" id="v-Tin2_wymiennik1_skal">--</div>
+                    <div class="tag-unit"></div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">Tout2_wymiennik1_skal</div>
+                        <div class="tag-meta">Int · %IW108</div>
+                    </div>
+                    <div class="tag-value" id="v-Tout2_wymiennik1_skal">--</div>
+                    <div class="tag-unit"></div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">F2</div>
+                        <div class="tag-meta">Real · %MD32</div>
+                    </div>
+                    <div class="tag-value" id="v-F2">--</div>
+                    <div class="tag-unit">m³/h</div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">F2_SP</div>
+                        <div class="tag-meta">Real · %MD36</div>
+                    </div>
+                    <div class="tag-value" id="v-F2_SP">--</div>
+                    <div class="tag-unit">m³/h</div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">F2_skal</div>
+                        <div class="tag-meta">Int · %IW204</div>
+                    </div>
+                    <div class="tag-value" id="v-F2_skal">--</div>
+                    <div class="tag-unit"></div>
+                </div>
+                <div class="tag-card">
+                    <div class="tag-info">
+                        <div class="tag-name">Zawor_F2</div>
+                        <div class="tag-meta">Int · %QW4</div>
+                    </div>
+                    <div class="tag-value" id="v-Zawor_F2">--</div>
+                    <div class="tag-unit"></div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /sections -->
+
+    <!-- Footer -->
+    <div class="footer">
+        <span>21 tags · poll 3s</span>
+        <span id="footerSource">source: --</span>
+    </div>
+
+</div><!-- /page -->
+
+<script>
+const socket = io();
+
+const VALVE_LABELS = { 0: 'CLOSED', 1: 'OPEN', 2: 'PARTIAL' };
+
+function setVal(id, raw, type) {
+    const el = document.getElementById('v-' + id);
+    if (!el) return;
+    el.className = 'tag-value';
+
+    if (type === 'Bool') {
+        el.textContent = raw ? 'ON' : 'OFF';
+        el.classList.add(raw ? 'bool-true' : 'bool-false');
+    } else if (id.startsWith('Zawor')) {
+        const label = VALVE_LABELS[raw] ?? raw;
+        el.textContent = label;
+        if (raw === 1) el.classList.add('valve-open');
+        else if (raw === 2) el.classList.add('valve-partial');
+        else el.classList.add('valve-closed');
+    } else if (type === 'Real') {
+        el.textContent = typeof raw === 'number' ? raw.toFixed(1) : raw;
+    } else {
+        el.textContent = raw;
+    }
+}
+
+const TAG_TYPES = {
+    T_hin:'Real', T_hout:'Real', T_we_piec_skal:'Int', T_wy_PIEC_skal:'Int',
+    Tin1_wymiennik1:'Real', Tout1_wymiennik1:'Real',
+    Tin1_wymiennik1_skal:'Int', Tout1_wymiennik1_skal:'Int',
+    Tin2_wymiennik1:'Real', Tout2_wymiennik1:'Real',
+    Tin2_wymiennik1_skal:'Int', Tout2_wymiennik1_skal:'Int',
+    F1:'Real', F1_SP:'Real', F1_skal:'Int',
+    F2:'Real', F2_SP:'Real', F2_skal:'Int',
+    Zawor_F1:'Word', Zawor_F2:'Int', power:'Bool'
+};
+
+function applyData(d) {
+    for (const [tag, type] of Object.entries(TAG_TYPES)) {
+        if (tag in d) setVal(tag, d[tag], type);
+    }
+
+    const src = d.source || 'UNKNOWN';
+    const dot = document.getElementById('srcDot');
+    document.getElementById('srcLabel').textContent = src;
+    document.getElementById('footerSource').textContent = 'source: ' + src;
+    dot.className = 'dot ' + (src === 'OPENPIPE' ? 'ok' : src === 'SIMULATION' ? 'sim' : 'err');
+    document.getElementById('lastUpdate').textContent =
+        new Date().toLocaleTimeString();
+}
+
+socket.on('process_tags', applyData);
+
+// Initial load
+fetch('/api/process/data')
+    .then(r => r.json())
+    .then(applyData)
+    .catch(() => {});
+</script>
+</body>
+</html>

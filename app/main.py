@@ -15,9 +15,10 @@ import os
 import logging
 import threading
 
-from plc_connector  import PLCConnector
-from thermal_model  import ThermalProcessModel
-from logger         import init_logger, log_sample, get_log_path, get_log_stats
+from plc_connector     import PLCConnector
+from thermal_model     import ThermalProcessModel
+from logger            import init_logger, log_sample, get_log_path, get_log_stats
+from openpipe_connector import OpenPipeConnector
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -26,8 +27,9 @@ app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # ── Singletons ────────────────────────────────────────────────────────────────
-plc   = PLCConnector()
-model = ThermalProcessModel(dt=3.0, tau_T=45.0, K_proc=220.0, T_init=20.0)
+plc      = PLCConnector()
+model    = ThermalProcessModel(dt=3.0, tau_T=45.0, K_proc=220.0, T_init=20.0)
+openpipe = OpenPipeConnector()
 init_logger()
 
 # Attempt PLC connection at startup (non-blocking)
@@ -102,6 +104,20 @@ def _plc_poll_loop():
             logging.warning(f"PLC broadcast failed: {exc}")
 
 threading.Thread(target=_plc_poll_loop, daemon=True, name="plc-poll").start()
+
+
+def _openpipe_poll_loop():
+    """Daemon thread: poll Open Pipe tags every 3 s and broadcast via Socket.IO."""
+    while True:
+        time.sleep(3)
+        try:
+            data = openpipe.read_all_tags()
+            data["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            socketio.emit('process_tags', data)
+        except Exception as exc:
+            logging.warning(f"Open Pipe poll failed: {exc}")
+
+threading.Thread(target=_openpipe_poll_loop, daemon=True, name="openpipe-poll").start()
 
 
 def get_plc_data() -> dict:
@@ -222,6 +238,20 @@ def status():
         "data_source":   "PLC" if plc.is_connected() else "SIMULATION",
         "log":           stats,
     })
+
+
+@app.route("/process")
+def process_page():
+    return render_template("process.html",
+                           openpipe_available=openpipe.is_available())
+
+
+@app.route("/api/process/data")
+def process_data():
+    """JSON endpoint — all 21 WinCC Unified tags."""
+    data = openpipe.read_all_tags()
+    data["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    return jsonify(data)
 
 
 @app.route("/health")
