@@ -1,35 +1,43 @@
 # Technical Architecture — S7-1500 Thermal Process Monitor
 
-**Project:** Thesis — Industrial Automation / Thermal Process Control
-**Stack:** Python 3.11 · Flask · Python-Snap7 · Docker · HTML/JS · Chart.js
+**Project:** Thesis — Industrial Automation / Thermal Process Control  
+**Stack:** Python 3.11 · Flask · Socket.IO · Python-Snap7 · Open Pipe · Docker · HTML/JS · Chart.js  
+**Deployment target:** Siemens SIMATIC HMI Unified Comfort Panel 7" (Industrial Edge)  
+**Dev environment:** Raspberry Pi 4 (192.168.1.38)
 
 ---
 
 ## System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Docker Container                      │
-│                                                             │
-│   ┌──────────────┐    ┌──────────────┐   ┌─────────────┐  │
-│   │  main.py     │───▶│plc_connector │──▶│ S7-1500 PLC │  │
-│   │  (Flask app) │    │  .py         │   │ (Snap7/TCP) │  │
-│   │              │    └──────────────┘   └─────────────┘  │
-│   │              │    ┌──────────────┐                     │
-│   │              │───▶│thermal_model │  (simulation only)  │
-│   │              │    │  .py         │                     │
-│   │              │    └──────────────┘                     │
-│   │              │    ┌──────────────┐                     │
-│   │              │───▶│  logger.py   │──▶ /app/logs/*.csv  │
-│   └──────────────┘    └──────────────┘                     │
-│          │                                                  │
-│          ▼                                                  │
-│   ┌──────────────┐                                         │
-│   │  Browser UI  │  Chart.js · PID visualizer · Setpoint  │
-│   │  port 5000   │  control · CSV export                   │
-│   └──────────────┘                                         │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                      Docker Container                            │
+│                                                                  │
+│  ┌──────────────┐   ┌──────────────────┐   ┌─────────────────┐  │
+│  │  main.py     │──▶│ plc_connector.py │──▶│ S7-1500 PLC     │  │
+│  │  (Flask +    │   │  (Snap7/TCP)     │   │ 192.168.1.100   │  │
+│  │  Socket.IO)  │   └──────────────────┘   └─────────────────┘  │
+│  │              │   ┌──────────────────┐                        │
+│  │              │──▶│openpipe_connector│──▶ /tempcontainer/     │
+│  │              │   │  .py (WinCC tags)│   (Unix socket)        │
+│  │              │   └──────────────────┘                        │
+│  │              │   ┌──────────────────┐                        │
+│  │              │──▶│ thermal_model.py │  (simulation fallback) │
+│  │              │   └──────────────────┘                        │
+│  │              │   ┌──────────────────┐                        │
+│  │              │──▶│   logger.py      │──▶ /app/logs/*.csv     │
+│  └──────────────┘   └──────────────────┘                        │
+│         │                                                        │
+│         ▼  Socket.IO (process_data · process_tags)               │
+│  ┌──────────────────────────────────────────────┐               │
+│  │  Browser UI — port 5000                      │               │
+│  │  / Monitor · /test · /process · /schema      │               │
+│  └──────────────────────────────────────────────┘               │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+**Data source priority:**  
+PLC (Snap7/TCP) → Open Pipe (WinCC Unified tags) → Simulation fallback
 
 ---
 
@@ -37,25 +45,31 @@
 
 ### `main.py` — Flask application entry point
 
-Instantiates singletons (PLCConnector, ThermalProcessModel, logger) and
-defines all HTTP routes. Implements a data source priority:
-real PLC data when connected, simulation fallback otherwise.
+Instantiates singletons and runs three background threads:
+- `_simulation_loop` — advances `ThermalProcessModel` every 3 s
+- `_plc_poll_loop` — polls S7-1500 via Snap7 every 3 s, emits `process_data`
+- `_openpipe_poll_loop` — reads 21 WinCC tags every 3 s, emits `process_tags`
 
 | Route | Method | Description |
 |---|---|---|
-| `/` | GET | Web supervision interface |
-| `/api/data` | GET | JSON process snapshot (polling, 3 s) |
-| `/api/setpoint` | POST | Update temperature and/or flow setpoints |
+| `/` | GET | Monitor — charts, PID visualiser, alarms, CSV export |
+| `/test` | GET | Test DB — read/write PLC variables V1–V9 |
+| `/process` | GET | Process — 21 WinCC tags in 3 sections |
+| `/schema` | GET | **Synoptique** — full-screen P&ID schematic (primary panel page) |
+| `/api/data` | GET | JSON process snapshot (Snap7 / simulation) |
+| `/api/setpoint` | POST | Update temperature / flow setpoints |
+| `/api/process/data` | GET | JSON — all 21 WinCC Unified tags |
+| `/api/process/write` | POST | Write F1_SP or F2_SP via Open Pipe |
 | `/api/export/csv` | GET | Download full process log as CSV |
 | `/api/status` | GET | PLC connection state, log statistics |
 | `/health` | GET | Docker healthcheck endpoint |
 
-### `plc_connector.py` — Siemens S7-1500 interface
+### `plc_connector.py` — Siemens S7-1500 interface (Snap7)
 
-Wraps `python-snap7` with connection management, graceful error handling,
-and read/write methods mapped to the TIA Portal DB layout.
+Wraps `python-snap7` for direct DB read/write over TCP.  
+Used for the Monitor page and simulation loop.
 
-**DB memory map (DB1 — adapt to TIA Portal):**
+**DB memory map (DB1):**
 
 | Address | Type | Variable |
 |---|---|---|
@@ -65,29 +79,93 @@ and read/write methods mapped to the TIA Portal DB layout.
 | DB1.DBD12 | REAL | Flow rate setpoint (m³/h) |
 | DB1.DBW16 | INT | Valve state (0=CLOSED, 1=OPEN, 2=PARTIAL) |
 
-> Prerequisites in TIA Portal: enable **PUT/GET access** in CPU properties
-> (Protection & Security → Connection mechanisms → Permit access with PUT/GET).
+### `openpipe_connector.py` — WinCC Unified Open Pipe interface
 
-### `thermal_model.py` — First-order simulation
+Reads/writes the 21 WinCC Unified internal tags via Unix socket at `/tempcontainer/`.  
+Falls back to simulated values when the socket is unavailable (dev on Pi).
 
-Discrete-time Euler integration of a thermal process:
+**Volume mapping required in `docker-compose.yml`:**
+```yaml
+volumes:
+  - /tmp/siemens/automation:/tempcontainer/
+```
+
+> **TODO:** Confirm exact socket filename and JSON protocol format with Siemens docs / Michal before deploying on panel.
+
+**21 WinCC Unified tags:**
+
+| Tag | Type | Role |
+|---|---|---|
+| T_hin | Real | Heater inlet temperature |
+| T_hout | Real | Heater outlet = HE hot inlet |
+| Tin1_wymiennik1 | Real | **HE hot inlet (controlled variable — PI+P loop)** |
+| Tout1_wymiennik1 | Real | HE hot outlet |
+| Tin2_wymiennik1 | Real | HE cold inlet |
+| Tout2_wymiennik1 | Real | **HE cold outlet (cascade outer loop — TBD)** |
+| F1 | Real | Hot flow rate |
+| **F1_SP** | Real | **Hot flow setpoint (manipulated variable — writable)** |
+| F2 | Real | Cold flow rate |
+| **F2_SP** | Real | **Cold flow setpoint (writable)** |
+| Zawor_F1 | Word | Hot valve state |
+| Zawor_F2 | Int | Cold valve state |
+| power | Bool | Heater on/off |
+| *_skal variants | Int | Scaled raw integer values (read-only) |
+
+### `thermal_model.py` — First-order simulation fallback
+
+Discrete-time Euler integration active when no PLC is connected:
 
 ```
 T[k+1] = T[k] + (dt / τ) · (K · u[k] − (T[k] − T_amb)) + w_T
 ```
 
-where `u[k]` is the normalised heater output (0–1) computed by an internal
-proportional controller, `τ = 45 s` is the thermal time constant, and
-`w_T ~ N(0, 0.25)` is measurement noise. Removed from production when PLC
-is connected.
+`τ = 45 s`, `K = 220`, noise `w_T ~ N(0, 0.25)`.
 
 ### `logger.py` — CSV data persistence
 
-Appends one row per 3-second sample to `/app/logs/process_data.csv`,
-mounted as a Docker named volume to survive container restarts.
+Appends one row per 3-second sample to `/app/logs/process_data.csv`.
 
-**Log columns:** `timestamp, temperature, setpoint_temp, flow_rate,
-setpoint_flow, valve_state, source`
+**Log columns:** `timestamp, temperature, setpoint_temp, flow_rate, setpoint_flow, valve_state, source`
+
+---
+
+## Web Pages
+
+| Page | Route | Description |
+|---|---|---|
+| Monitor | `/` | Time-series charts, PID visualiser, multi-level alarms, CSV replay |
+| Test DB | `/test` | Raw PLC variable read/write (V1–V9) |
+| Process | `/process` | All 21 WinCC tags in 3 sections: Four, Échangeur 1, Échangeur 2 |
+| **Synoptique** | `/schema` | **Full-screen P&ID schematic — primary display for the 7" panel** |
+
+### Synoptique (`/schema`) — P&ID layout
+
+```
+T_hin → [HEATER] → T_hout=Tin1 → [──── HEAT EXCHANGER ────] → Tout1
+  power                F1 (hot flow →)                   Zawor_F1
+                       ← ← ← ← ← ← ← ← ← ← ← ← ← ←
+         Tout2 ←     F2 (cold flow ←)                   Zawor_F2  ← Tin2
+```
+
+Setpoints F1_SP and F2_SP are editable via touch-friendly arrow buttons.
+
+---
+
+## Control Strategy (planned)
+
+### Primary loop — PI+P on Tin1
+- **Controlled variable:** Tin1 (HE hot inlet temperature)
+- **Manipulated variable:** F1 (hot flow rate via F1_SP)
+- **Structure:** PI+P (proportional on measurement — avoids setpoint kick)
+- **Gains:** To be identified
+
+### Cascade loop — Tout2 (under discussion with Michal)
+- **Outer loop:** Tout2 (cold outlet) → output = Tin1_SP
+- **Inner loop:** PI+P on Tin1 → F1_SP
+- **Status:** Architecture to be confirmed
+
+> Controllers will be implemented server-side in Python (dedicated thread in `main.py`).  
+> The current browser-side PID in `index.html` is a visualisation placeholder only.
 
 ---
 
@@ -96,15 +174,21 @@ setpoint_flow, valve_state, source`
 ```
 project-s7/
 ├── app/
-│   ├── main.py              Flask application + routes
-│   ├── plc_connector.py     Snap7 PLC interface
-│   ├── thermal_model.py     First-order simulation model
-│   ├── logger.py            CSV data logger
-│   └── requirements.txt     Python dependencies
-├── logs/                    Persistent process data logs (gitignored)
-├── Dockerfile               Multi-layer Python 3.11-slim image
-├── docker-compose.yml       Service orchestration
-├── .env                     PLC IP, rack, slot configuration
+│   ├── main.py                Flask app + routes + background threads
+│   ├── plc_connector.py       Snap7 PLC interface (TCP, DB read/write)
+│   ├── openpipe_connector.py  WinCC Unified Open Pipe (21 tags)
+│   ├── thermal_model.py       First-order simulation fallback
+│   ├── logger.py              CSV data logger
+│   ├── requirements.txt       Python dependencies
+│   └── templates/
+│       ├── index.html         Monitor page
+│       ├── test.html          Test DB page
+│       ├── process.html       Process page (21 tags)
+│       └── schema.html        Synoptique page (primary panel page)
+├── logs/                      Persistent process data (gitignored)
+├── Dockerfile                 Python 3.11-slim image
+├── docker-compose.yml         Service orchestration
+├── .env                       PLC IP, rack, slot, DB config
 └── .dockerignore
 ```
 
@@ -113,57 +197,53 @@ project-s7/
 ## Configuration (`.env`)
 
 ```env
-PLC_IP=192.168.0.1     # S7-1500 IP address on the industrial network
-PLC_RACK=0             # CPU rack number (default: 0)
-PLC_SLOT=1             # CPU slot number (default: 1 for S7-1500)
-PLC_DB=1               # Data block number
-FLASK_DEBUG=0          # Set to 1 for development hot-reload
+PLC_IP=192.168.1.100   # S7-1500 IP
+PLC_RACK=0
+PLC_SLOT=1
+PLC_DB=1
+PORT=5000
+FLASK_DEBUG=1          # Set to 0 in production
 ```
 
 ---
 
-## Docker Commands Reference
+## Deployment
 
-```powershell
-# Initial build and start
-docker compose up -d --build
+### Development — Raspberry Pi (192.168.1.38)
 
-# View real-time logs
+```bash
+# Deploy update
+git pull && docker compose down && docker compose up -d --build
+
+# View logs
 docker compose logs -f
 
-# Rebuild after dependency change (requirements.txt, Dockerfile)
-docker compose up -d --build
-
-# Open a shell inside the container (debugging)
-docker compose exec app bash
-
-# Stop all services
-docker compose down
-
-# Download process log
-# → open http://localhost:5000/api/export/csv in browser
-
-# Check system status (PLC connection, log stats)
-# → open http://localhost:5000/api/status in browser
+# Shutdown properly
+docker compose down && sudo shutdown -h now
 ```
 
----
+### Production target — SIMATIC HMI Unified Comfort Panel 7"
 
-## PLC Connection — Checklist (Friday)
-
-- [ ] Verify network connectivity: `ping <PLC_IP>` from the host
-- [ ] TIA Portal: PUT/GET access enabled in CPU Protection settings
-- [ ] Update `PLC_IP` in `.env`
-- [ ] Update DB number in `plc_connector.py` (`DB_NUMBER`) if different from DB1
-- [ ] Verify memory offsets match TIA Portal DB layout
-- [ ] Rebuild container: `docker compose up -d --build`
-- [ ] Check connection status: `http://localhost:5000/api/status`
+1. Install **Industrial Edge Publisher** (available from Michal, week of 2026-04-14)
+2. Activate **Edge licence** (to be provided by Michal)
+3. Package `docker-compose.yml` → `.app` with Edge Publisher
+4. Add Open Pipe volume: `/tmp/siemens/automation:/tempcontainer/`
+5. Deploy `.app` to panel via Edge Management
+6. Confirm Open Pipe socket filename + protocol with Siemens docs
 
 ---
 
-## PID Controller
+## Network
 
-The PID visualiser runs client-side (JavaScript) for display purposes.
-Gains Kp, Ki, Kd are adjustable from the interface at runtime.
-When connected to the real S7-1500, the PID loop runs inside the
-TIA Portal FB PID_Compact block; the web interface acts as a supervisor only.
+```
+PC (WiFi) ──────────────────┐
+Pi (WiFi/Ethernet) ──────────┤ Router/Switch
+S7-1500 PLC (Ethernet) ──────┤  192.168.1.x
+Panel Unified 7" (Ethernet) ─┘
+```
+
+| Device | IP |
+|---|---|
+| Raspberry Pi | 192.168.1.38 |
+| SIMATIC Panel | 192.168.1.200 |
+| S7-1500 PLC | 192.168.1.100 |
