@@ -17,16 +17,33 @@ Projet de thèse — déployé sur SIMATIC HMI Unified Comfort Panel 7" via Indu
 
 ## Procédé
 
-```
-                    F1 (flux chaud)
-  T_hin             ─────────────────────────────────→  Tout1
-    │    ┌─────────┐  Tin1                              │
-    └───▶│  FOUR   │──────▶ ┌─────────────────────┐    │
-         └─────────┘        │   ÉCHANGEUR HE-001   │    ▼
-           power             │  ─ ─ ─ ─ ─ ─ ─ ─ ─ │
-                             │  ←←←←←←←←←←←←←←←   │
-         Tout2 ◀─────────────┤   F2 (flux froid)   │◀──── Tin2
-                             └─────────────────────┘
+```mermaid
+flowchart LR
+    THIN(["🌡 T_hin"]):::temp
+    FOUR["🔥 FOUR\npower ON/OFF"]:::heater
+    THOUT(["🌡 T_hout\n= Tin1"]):::temp
+    HE["♨️ ÉCHANGEUR\nHE-001"]:::he
+    TOUT1(["🌡 Tout1"]):::temp
+
+    TCOLD_IN(["🌡 Tin2\n← froid entrant"]):::cold
+    TOUT2(["🌡 Tout2\n← froid sortant"]):::cold
+
+    F1(["⟶ F1\ndébit chaud"]):::flow
+    F2(["⟵ F2\ndébit froid"]):::flow
+
+    THIN -->|flux chaud| FOUR
+    FOUR -->|"F1 →"| THOUT
+    THOUT --> HE
+    HE -->|"→ Tout1"| TOUT1
+
+    TCOLD_IN -->|"F2 ←"| HE
+    HE --> TOUT2
+
+    classDef heater fill:#fff3e0,stroke:#d45a00,stroke-width:2px,color:#d45a00
+    classDef he     fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#1565c0
+    classDef temp   fill:#fce4ec,stroke:#c62828,stroke-width:1px,color:#c62828
+    classDef cold   fill:#e1f5fe,stroke:#0277bd,stroke-width:1px,color:#0277bd
+    classDef flow   fill:#f3e5f5,stroke:#6a1b9a,stroke-width:1px,color:#6a1b9a
 ```
 
 Le four chauffe le flux F1 → le flux chaud cède sa chaleur au flux froid dans l'échangeur (contre-courant).  
