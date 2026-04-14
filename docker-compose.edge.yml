@@ -1,0 +1,19 @@
+version: "3"
+
+services:
+  app:
+    image: project-s7-app
+    container_name: s7-thermal-app
+    ports:
+      - "30500:5000"
+    mem_limit: 256m
+    environment:
+      - PLC_IP=192.168.1.100
+      - PLC_RACK=0
+      - PLC_SLOT=1
+      - PLC_DB=1
+      - FLASK_DEBUG=0
+      - PORT=5000
+    volumes:
+      - /tmp/siemens/automation:/tempcontainer/
+    restart: unless-stopped
