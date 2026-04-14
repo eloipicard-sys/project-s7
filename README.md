@@ -230,6 +230,32 @@ FLASK_DEBUG=1
 
 ---
 
+---
+
+## Développement local (sans Docker)
+
+```bash
+cd app
+pip install -r requirements.txt
+PLC_IP=192.168.1.100 FLASK_DEBUG=1 python main.py
+```
+
+Vérifier que l'app tourne :
+```bash
+curl http://localhost:5000/health
+curl http://localhost:5000/api/data
+```
+
+---
+
+## TIA Portal — prérequis PLC
+
+- Activer **PUT/GET access** : CPU Properties → Protection & Security → Permit access with PUT/GET
+- DB1 avec **Optimized block access désactivé**
+- Vérifier que les offsets DB correspondent à `plc_connector.py`
+
+---
+
 <div align="center">
 <sub>Projet de thèse — Automatisation industrielle · Procédé thermique S7-1500</sub>
 </div>
