@@ -15,10 +15,12 @@ import os
 import logging
 import threading
 
-from plc_connector     import PLCConnector
-from thermal_model     import ThermalProcessModel
-from logger            import init_logger, log_sample, get_log_path, get_log_stats
+from plc_connector      import PLCConnector
+from thermal_model      import ThermalProcessModel
+from logger             import init_logger, log_sample, get_log_path, get_log_stats
 from openpipe_connector import OpenPipeConnector
+from cascade_controller import CascadeController
+from identification     import StepIdentifier
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -27,9 +29,11 @@ app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # ── Singletons ────────────────────────────────────────────────────────────────
-plc      = PLCConnector()
-model    = ThermalProcessModel(dt=3.0, tau_T=45.0, K_proc=220.0, T_init=20.0)
-openpipe = OpenPipeConnector()
+plc          = PLCConnector()
+model        = ThermalProcessModel(dt=3.0, tau_T=45.0, K_proc=220.0, T_init=20.0)
+openpipe     = OpenPipeConnector()
+cascade_ctrl = CascadeController()
+step_ident   = StepIdentifier()
 init_logger()
 
 # Attempt PLC connection at startup (non-blocking)
@@ -107,13 +111,40 @@ threading.Thread(target=_plc_poll_loop, daemon=True, name="plc-poll").start()
 
 
 def _openpipe_poll_loop():
-    """Daemon thread: poll Open Pipe tags every 3 s and broadcast via Socket.IO."""
+    """Daemon thread: poll Open Pipe tags every 3 s, run cascade/identification, broadcast."""
     while True:
         time.sleep(3)
         try:
             data = openpipe.read_all_tags()
             data["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
+
+            Tin1  = data.get('Tin1_HE1', 0.0)
+            Tout2 = data.get('Tout2_HE1', 0.0)
+            F1_SP = data.get('F1_SP', 0.0)
+
+            # Identification takes priority over cascade auto-control
+            ident_write = step_ident.feed(Tin1, Tout2, F1_SP)
+            if ident_write is not None:
+                openpipe.write_tag('F1_SP', ident_write)
+            elif cascade_ctrl.mode != CascadeController.MODE_MANUAL:
+                F1_new = cascade_ctrl.update(Tin1, Tout2)
+                if F1_new is not None:
+                    openpipe.write_tag('F1_SP', F1_new)
+            else:
+                cascade_ctrl.update(Tin1, Tout2)
+
             socketio.emit('process_tags', data)
+
+            ident_st = step_ident.get_status()
+            socketio.emit('ident_update', {
+                'status': ident_st,
+                'chart':  step_ident.get_chart_data() if ident_st['state'] != StepIdentifier.IDLE else [],
+            })
+
+            cascade_st = cascade_ctrl.get_status()
+            cascade_st['timestamp'] = data['timestamp']
+            socketio.emit('cascade_data', cascade_st)
+
         except Exception as exc:
             logging.warning(f"Open Pipe poll failed: {exc}")
 
@@ -335,6 +366,85 @@ def test_write():
     except Exception as exc:
         logging.error(f"[TEST] write {variable} failed: {exc}")
         return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CASCADE CONTROL & IDENTIFICATION
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/cascade")
+def cascade_page():
+    return render_template("cascade.html")
+
+
+@app.route("/api/cascade/status")
+def cascade_status():
+    return jsonify(cascade_ctrl.get_status())
+
+
+@app.route("/api/cascade/mode", methods=["POST"])
+def cascade_mode():
+    data  = request.get_json(force=True)
+    mode  = data.get("mode", "")
+    tags  = openpipe.read_all_tags()
+    F1_SP = tags.get("F1_SP", 0.0)
+    Tin1  = tags.get("Tin1_wymiennik1", 0.0)
+    try:
+        cascade_ctrl.set_mode(mode, current_F1_SP=F1_SP, current_Tin1=Tin1)
+        return jsonify({"ok": True, "mode": mode})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/cascade/setpoint", methods=["POST"])
+def cascade_setpoint():
+    data = request.get_json(force=True)
+    if "Tout2_SP" in data:
+        cascade_ctrl.set_Tout2_SP(float(data["Tout2_SP"]))
+    if "Tin1_SP" in data:
+        cascade_ctrl.set_Tin1_SP(float(data["Tin1_SP"]))
+    return jsonify({"ok": True, **cascade_ctrl.get_status()})
+
+
+@app.route("/api/cascade/params", methods=["POST"])
+def cascade_params():
+    data = request.get_json(force=True)
+    if "inner_Kp" in data and "inner_Ti" in data:
+        cascade_ctrl.set_inner_params(float(data["inner_Kp"]), float(data["inner_Ti"]))
+    if "outer_Kp" in data:
+        cascade_ctrl.set_outer_params(float(data["outer_Kp"]))
+    return jsonify({"ok": True, **cascade_ctrl.get_status()})
+
+
+@app.route("/api/identification/start", methods=["POST"])
+def ident_start():
+    if cascade_ctrl.mode != CascadeController.MODE_MANUAL:
+        return jsonify({"ok": False, "error": "Mettre la cascade en MANUEL avant d'identifier"}), 400
+    data       = request.get_json(force=True)
+    tags       = openpipe.read_all_tags()
+    base_F1    = float(data.get("base_F1_SP", tags.get("F1_SP", 2.0)))
+    amplitude  = float(data.get("amplitude", 0.5))
+    duration_s = float(data.get("duration_s", 120))
+    step_ident.start(base_F1, amplitude, duration_s)
+    return jsonify({"ok": True, "base_F1_SP": base_F1, "step_F1_SP": base_F1 + amplitude})
+
+
+@app.route("/api/identification/cancel", methods=["POST"])
+def ident_cancel():
+    restore = step_ident.cancel()
+    if restore is not None:
+        openpipe.write_tag('F1_SP', restore)
+    return jsonify({"ok": True, "restored_F1_SP": restore})
+
+
+@app.route("/api/identification/status")
+def ident_status_route():
+    return jsonify(step_ident.get_status())
+
+
+@app.route("/api/identification/data")
+def ident_data_route():
+    return jsonify({"data": step_ident.get_chart_data()})
 
 
 if __name__ == "__main__":

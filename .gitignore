@@ -5,5 +5,26 @@ __pycache__/
 *.pyo
 .DS_Store
 .claude/
+CLAUDE.md
 *.docx
 test_docker/
+
+# Large archives
+edge/
+project-s7-app.tar
+latex.zip
+
+# LaTeX build artifacts
+latex/*.aux
+latex/*.log
+latex/*.bbl
+latex/*.bcf
+latex/*.blg
+latex/*.lof
+latex/*.lot
+latex/*.out
+latex/*.toc
+latex/*.run.xml
+latex/*.synctex.gz
+latex/*.pdf
+latex/chapters/*.log

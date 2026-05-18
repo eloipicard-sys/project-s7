@@ -1,0 +1,272 @@
+\chapter{Siemens S7-1500 and TIA Portal}
+
+\section{S7-1500 PLC Architecture}
+
+\subsection{Overview and Scan Cycle}
+
+The Siemens S7-1500 is a high-performance PLC series designed for demanding automation
+tasks requiring high processing speed, integrated motion control, and native PROFINET
+communication. The installation at ICAM uses an S7-1500 CPU at IP address 192.168.1.10.
+
+The S7-1500 CPU executes a deterministic scan cycle comprising three phases:
+
+\begin{enumerate}[leftmargin=*, itemsep=3pt]
+  \item \textbf{Input update:} Physical inputs from the I/O modules are read into the
+    Process Image Input (PII), creating a synchronised snapshot of all \plcaddr{I} and
+    \plcaddr{IW} values.
+  \item \textbf{Program execution:} The user program (OB1 and called FCs/FBs) runs,
+    reading from PII and writing results to the Process Image Output (PIO) and memory
+    areas (\plcaddr{M}, \plcaddr{DB}).
+  \item \textbf{Output update:} PIO values are transferred to the physical output modules
+    (\plcaddr{Q}, \plcaddr{QW}).
+\end{enumerate}
+
+This three-phase structure guarantees that all logic within one scan cycle operates on a
+consistent view of the I/O, preventing race conditions between input reading and output
+writing. The scan cycle time is typically a few milliseconds --- much shorter than the
+3-second poll rate of the web application.
+
+\subsection{Memory Organisation}
+
+Table~\ref{tab:plcmem} summarises the memory areas relevant to this project.
+
+\begin{table}[H]
+  \centering
+  \caption{S7-1500 memory areas used in this project.}
+  \label{tab:plcmem}
+  \begin{tabular}{@{}L{2.8cm}L{2.0cm}L{3cm}L{5.2cm}@{}}
+    \toprule
+    \textbf{Area} & \textbf{Symbol} & \textbf{Access} & \textbf{Purpose} \\
+    \midrule
+    Process Image Input  & \plcaddr{I}/\plcaddr{IW} & Read-only (scan) & Snapshot of physical inputs \\
+    Process Image Output & \plcaddr{Q}/\plcaddr{QW} & Written by OB1   & Drives physical outputs \\
+    Bit Memory (Merkers) & \plcaddr{M}/\plcaddr{MD} & Read/write       & Global variables, scaled values \\
+    Data Blocks          & \plcaddr{DB}             & Read/write       & Structured storage (Snap7 access) \\
+    Timers / Counters    & \plcaddr{T}/\plcaddr{C}  & System-managed   & Timing and counting \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The deliberate use of \plcaddr{MD} (Merker Double-word, 32-bit REAL) for scaled
+engineering-unit values decouples the scaling logic from the communication layer:
+both OB1 and external tools (Snap7, Open Pipe) access the same scaled variables.
+
+\section{TIA Portal V18 Configuration}
+
+TIA Portal (Totally Integrated Automation Portal) is the unified Siemens engineering
+environment for programming and configuring S7 PLCs, WinCC HMI, and drive systems.
+The project uses TIA Portal V18.
+
+\subsection{Hardware Configuration}
+
+The hardware configuration defines the physical arrangement of CPU and I/O modules and
+assigns \plcaddr{IW}/\plcaddr{QW} addresses to each module. The addresses depend directly
+on the physical slot position of each module: changing the slot order changes all downstream
+addresses. The hardware configuration is therefore the authoritative source for address
+allocation.
+
+For the thermal rig, analog input modules (AI) occupy specific slots, determining the
+\plcaddr{IW} addresses listed in Table~\ref{tab:tags}. The analog output module determines
+the \plcaddr{QW8} and \plcaddr{QW4} addresses for \code{Valve\_F1} and
+\code{Valve\_F2}.
+
+\subsection{Tag Table}
+
+The TIA Portal tag table is the central register mapping symbolic names to memory addresses.
+This project defines 21 process tags (Table~\ref{tab:tags}), retained after a cleanup
+that removed 25 intermediate, redundant, or test variables from an initial set of 46.
+
+The naming convention adopted uses English names with the suffix \code{\_HE1} for heat
+exchanger variables (e.g., \code{Tin1\_HE1}, \code{Tout2\_HE1}, \code{Valve\_F1}).
+Raw ADC signals carry the suffix \code{\_raw} or \code{\_skal}.
+
+\subsection{OB1 and Scaling Function}
+
+OB1 (Organisation Block~1) is the main cyclic program, called every scan cycle. It contains:
+
+\begin{enumerate}[leftmargin=*, itemsep=3pt]
+  \item \textbf{Scaling FC calls.} For each analog input channel, a Function block reads
+    the raw \plcaddr{IW} value and computes the engineering-unit value using
+    equation~\eqref{eq:scaling}, writing the result to the corresponding \plcaddr{MD}
+    address. For example, raw \plcaddr{IW112} is scaled to \si{\degreeCelsius} and
+    written to \plcaddr{MD48} (\code{Tin1\_HE1}).
+
+  \item \textbf{Valve command computation.} $F_{1,SP}$ (m$^3$/h, stored at \plcaddr{MD24})
+    is converted to a Word output for \plcaddr{QW8} via the inverse of the scaling formula:
+    $\text{cmd} = \lfloor(F_{1,SP} / F_{1,\max}) \times 27648\rfloor$.
+
+  \item \textbf{DB1 update FC.} A small Function copies key \plcaddr{MD} values into DB1
+    at fixed offsets, making them readable by Snap7 from the PC.
+\end{enumerate}
+
+\subsection{DB1 for Snap7 Access}
+\label{sec:db1}
+
+DB1 is a Data Block configured with \textbf{standard (non-optimized) block access}.
+This is a critical configuration point: by default, TIA Portal creates new DBs with
+\textit{Optimized block access} enabled, which allows the compiler to arrange variables
+freely for performance and hides the byte offsets. The Snap7 library requires
+\textbf{known, fixed byte offsets} to read and write DB variables. Disabling optimized
+access (Properties $\rightarrow$ Attributes $\rightarrow$ uncheck \textit{Optimized block
+access}) makes the offsets visible in the DB editor and enables Snap7 access.
+
+Table~\ref{tab:db1} shows the DB1 structure used by Snap7.
+
+\begin{table}[H]
+  \centering
+  \caption{DB1 structure for Snap7 access (non-optimized, absolute offsets).}
+  \label{tab:db1}
+  \begin{tabular}{@{}C{2.2cm}C{2.4cm}L{3.5cm}L{5cm}@{}}
+    \toprule
+    \textbf{Byte offset} & \textbf{TIA type} & \textbf{Variable} & \textbf{Description} \\
+    \midrule
+    DBD0  & REAL & \code{temperature}   & $T_{in1,HE1}$ (\si{\degreeCelsius}) \\
+    DBD4  & REAL & \code{flow\_rate}    & $F_1$ (\si{\metre\cubed\per\hour}) \\
+    DBD8  & REAL & \code{setpoint\_temp}& Temperature setpoint (\si{\degreeCelsius}) \\
+    DBD12 & REAL & \code{setpoint\_flow}& $F_{1,SP}$ (\si{\metre\cubed\per\hour}) \\
+    DBW16 & INT  & \code{valve\_state}  & 0\,=\,CLOSED, 1\,=\,OPEN, 2\,=\,PARTIAL \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{WinCC Unified and SIMATIC Panel 7\textquotedblright}
+
+\subsection{WinCC Unified Runtime}
+
+WinCC Unified is Siemens' latest-generation HMI software, designed for touchscreen panels
+and web browsers. The SIMATIC Unified 7\textquotedblright{} panel (IP~192.168.1.200) runs
+WinCC Unified Runtime, which connects to the S7-1500 over PROFINET and maintains a local
+tag cache mirroring all PLC variables.
+
+The WinCC Unified tag table uses the same symbolic names as the PLC tag table. At runtime,
+WinCC continuously polls the PLC and updates its local cache. This cache is what the
+Open Pipe mechanism exposes to external applications (such as the Docker container).
+
+\subsection{Open Pipe Communication}
+\label{sec:openpipe}
+
+Open Pipe is a Siemens proprietary mechanism that allows external processes running on the
+same hardware as WinCC Unified to read and write WinCC tags via a Unix domain socket.
+
+\textbf{Socket location.}
+The socket is located at \code{/tmp/siemens/automation/openpipe.sock} on the panel
+filesystem. When the Flask application runs in a Docker container on the panel, this socket
+is made accessible inside the container via a volume mount:
+
+\begin{lstlisting}[style=yaml, caption={Docker volume mount for Open Pipe access.}]
+volumes:
+  - /tmp/siemens/automation:/tempcontainer/
+\end{lstlisting}
+
+Inside the container, the socket appears at \code{/tempcontainer/openpipe.sock}.
+
+\textbf{Protocol.}
+Communication uses newline-delimited JSON messages over a Unix \texttt{SOCK\_STREAM} socket:
+
+\begin{lstlisting}[style=json,
+  caption={Open Pipe read/write request--response format.},
+  label={lst:openpipe}]
+// Read request
+{"action": "read", "tags": ["Tin1_HE1", "F1_SP", "Tout2_HE1"]}
+// Response
+{"Tin1_HE1": 75.3, "F1_SP": 3.0, "Tout2_HE1": 42.1}
+
+// Write request
+{"action": "write", "tag": "F1_SP", "value": 3.5}
+\end{lstlisting}
+
+\textbf{Advantages over Snap7.}
+Open Pipe uses tag names directly (matching the WinCC tag table), rather than raw byte
+offsets. It requires no knowledge of DB structure or data types~--- WinCC handles type
+conversion. Each request is served from the WinCC tag cache, without triggering a PLC poll.
+
+\textbf{Simulation fallback.}
+When the socket file does not exist (e.g., during PC development), the
+\code{OpenPipeConnector} class automatically returns plausible simulated values for all
+21 tags. The \code{source} field in the API response switches from \texttt{"OPENPIPE"} to
+\texttt{"SIMULATION"}, alerting the user to the fallback mode.
+
+\subsection{Snap7 and Open Pipe: Coexistence}
+
+The project uses both protocols simultaneously but for different purposes:
+
+\begin{table}[H]
+  \centering
+  \caption{Coexistence of Snap7 and Open Pipe communication layers.}
+  \label{tab:protocols}
+  \begin{tabular}{@{}L{2.5cm}L{3.5cm}C{1.8cm}L{4cm}@{}}
+    \toprule
+    \textbf{Protocol} & \textbf{Module} & \textbf{Tags} & \textbf{Used by} \\
+    \midrule
+    Snap7 (TCP 102)   & \code{plc\_connector.py}     & 5 (DB1)  & Monitor page, CSV logger \\
+    Open Pipe (socket)& \code{openpipe\_connector.py}& 21 (WinCC)& Synoptique, Cascade, Process \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The two connectors operate on independent threads and do not interfere with each other.
+
+\section{Industrial Edge Deployment}
+
+\subsection{Industrial Edge Overview}
+
+Siemens Industrial Edge turns compatible hardware (including the SIMATIC Unified panel)
+into an embedded Linux host running a Docker daemon managed by the Edge Runtime service.
+The deployment workflow introduces a packaging step: the application must be bundled into
+a \texttt{.app} file using the \textit{Siemens Industrial Edge App Publisher} desktop tool.
+This tool reads \code{docker-compose.edge.yml}, embeds the Docker image layers, and
+produces a signed archive for the Edge Management console.
+
+\subsection{Edge Docker Compose Configuration}
+
+The edge-specific \code{docker-compose.edge.yml} differs from the development configuration
+in three key respects:
+
+\begin{lstlisting}[style=yaml,
+  caption={Edge Docker Compose configuration (\texttt{docker-compose.edge.yml}).},
+  label={lst:edgecompose}]
+services:
+  app:
+    image: project-s7-app:latest
+    restart: unless-stopped
+    ports:
+      - "30500:5000"      # Edge apps must use ports 30000-35000
+    environment:
+      - FLASK_DEBUG=0
+      - LOG_DIR=/app/logs
+    mem_limit: 256m       # Panel hardware constraint
+    volumes:
+      - /tmp/siemens/automation:/tempcontainer/
+      - ie-databus:/app/logs
+    networks:
+      - ieguestnetwork
+\end{lstlisting}
+
+\begin{itemize}[leftmargin=*, itemsep=3pt]
+  \item \textbf{Port 30500:} Industrial Edge requires user-application ports in the range
+    30\,000--35\,000.
+  \item \textbf{Memory limit:} 256\,MB respects the panel's limited hardware resources.
+  \item \textbf{Volume mount:} \code{/tmp/siemens/automation} grants the container access
+    to the Open Pipe socket.
+  \item \textbf{Guest network:} \code{ieguestnetwork} provides connectivity to the panel's
+    PROFINET interface without exposing internal services.
+\end{itemize}
+
+\subsection{Deployment Process and Current Status}
+
+The standard deployment sequence is:
+\begin{enumerate}[leftmargin=*, itemsep=3pt]
+  \item Build the Docker image on the development PC:
+    \code{docker compose -f docker-compose.edge.yml build}
+  \item Import \code{docker-compose.edge.yml} into App Publisher $\rightarrow$
+    validate $\rightarrow$ export as \texttt{.app}
+  \item Log in to the Edge Management console at \code{http://192.168.1.200} with
+    Industrial Edge licence credentials $\rightarrow$ upload \texttt{.app} $\rightarrow$ deploy
+  \item Access the deployed application at \code{http://192.168.1.200:30500}
+\end{enumerate}
+
+\textbf{Current status:} The \texttt{.app} file has been successfully generated by
+App Publisher. Deployment on the panel is pending acquisition of Industrial Edge licence
+credentials. In the interim, the application runs on the development PC (port 5000) and is
+accessible from the panel browser at \code{http://192.168.1.149:5000}. A Windows Firewall
+inbound rule was added to allow TCP connections on port~5000 from the local subnet.

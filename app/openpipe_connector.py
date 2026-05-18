@@ -25,27 +25,32 @@ SOCKET_FILE = os.getenv("OPENPIPE_SOCKET_FILE", "openpipe.sock")
 
 # All 21 WinCC Unified internal tags with their types
 TAG_TYPES = {
-    "T_hin":                 "Real",
-    "T_hout":                "Real",
-    "T_we_piec_skal":        "Int",
-    "T_wy_PIEC_skal":        "Int",
-    "Tin1_wymiennik1":       "Real",
-    "Tout1_wymiennik1":      "Real",
-    "Tin1_wymiennik1_skal":  "Int",
-    "Tout1_wymiennik1_skal": "Int",
-    "Tin2_wymiennik1":       "Real",
-    "Tout2_wymiennik1":      "Real",
-    "Tin2_wymiennik1_skal":  "Int",
-    "Tout2_wymiennik1_skal": "Int",
-    "F1":                    "Real",
-    "F1_SP":                 "Real",
-    "F1_skal":               "Int",
-    "F2":                    "Real",
-    "F2_SP":                 "Real",
-    "F2_skal":               "Int",
-    "Zawor_F1":              "Word",
-    "Zawor_F2":              "Int",
-    "power":                 "Bool",
+    # Furnace
+    "T_hin":                      "Real",
+    "T_hout":                     "Real",
+    "T_we_rock_furnace":          "Int",
+    "T_wy_Oven_scale":            "Int",
+    # Heat exchanger HE1
+    "Tin1_HE1":                   "Real",
+    "Tout1_HE1":                  "Real",
+    "Tin2_HE1":                   "Real",
+    "Tout2_HE1":                  "Real",
+    "Tin1_heat_exchanger1_scale": "Int",
+    "Tout1_HE1_raw":              "Int",
+    "Tin2_HE1_raw":               "Int",
+    "Tout2_HE1_raw":              "Int",
+    # Flow circuit 1
+    "F1":                         "Real",
+    "F1_SP":                      "Real",
+    "F1_skal":                    "Int",
+    "Valve_F1":                   "Word",
+    # Flow circuit 2
+    "F2":                         "Real",
+    "F2_SP":                      "Real",
+    "F2_skal":                    "Int",
+    "Valve_F2":                   "Int",
+    # Power
+    "power":                      "Bool",
 }
 
 TAGS = list(TAG_TYPES.keys())
@@ -144,31 +149,31 @@ class OpenPipeConnector:
     # ── Simulation fallback ────────────────────────────────────────────────────
 
     def _simulated_values(self) -> dict:
-        """Return plausible simulated values for all 21 tags."""
+        """Return plausible simulated values for the 21 process tags."""
         t = time.time()
         base_t = 80.0 + 20.0 * abs((t % 60) / 30.0 - 1.0)
         f1 = round(2.5 + 0.5 * abs((t % 30) / 15.0 - 1.0), 2)
         f2 = round(1.8 + 0.3 * abs((t % 20) / 10.0 - 1.0), 2)
         return {
-            "T_hin":                 round(base_t - 10.0, 1),
-            "T_hout":                round(base_t + 15.0, 1),
-            "T_we_piec_skal":        int((base_t - 10.0) * 10),
-            "T_wy_PIEC_skal":        int((base_t + 15.0) * 10),
-            "Tin1_wymiennik1":       round(base_t - 5.0, 1),
-            "Tout1_wymiennik1":      round(base_t + 8.0, 1),
-            "Tin1_wymiennik1_skal":  int((base_t - 5.0) * 10),
-            "Tout1_wymiennik1_skal": int((base_t + 8.0) * 10),
-            "Tin2_wymiennik1":       round(base_t - 3.0, 1),
-            "Tout2_wymiennik1":      round(base_t + 6.0, 1),
-            "Tin2_wymiennik1_skal":  int((base_t - 3.0) * 10),
-            "Tout2_wymiennik1_skal": int((base_t + 6.0) * 10),
-            "F1":                    f1,
-            "F1_SP":                 3.0,
-            "F1_skal":               int(f1 * 100),
-            "F2":                    f2,
-            "F2_SP":                 2.0,
-            "F2_skal":               int(f2 * 100),
-            "Zawor_F1":              1,
-            "Zawor_F2":              2,
-            "power":                 True,
+            "T_hin":                      round(base_t - 10.0, 1),
+            "T_hout":                     round(base_t + 15.0, 1),
+            "T_we_rock_furnace":          int((base_t - 10.0) * 10),
+            "T_wy_Oven_scale":            int((base_t + 15.0) * 10),
+            "Tin1_HE1":                   round(base_t - 5.0, 1),
+            "Tout1_HE1":                  round(base_t + 8.0, 1),
+            "Tin2_HE1":                   round(base_t - 3.0, 1),
+            "Tout2_HE1":                  round(base_t + 6.0, 1),
+            "Tin1_heat_exchanger1_scale": int((base_t - 5.0) * 10),
+            "Tout1_HE1_raw":              int((base_t + 8.0) * 10),
+            "Tin2_HE1_raw":               int((base_t - 3.0) * 10),
+            "Tout2_HE1_raw":              int((base_t + 6.0) * 10),
+            "F1":                         f1,
+            "F1_SP":                      3.0,
+            "F1_skal":                    int(f1 * 100),
+            "Valve_F1":                   1,
+            "F2":                         f2,
+            "F2_SP":                      2.0,
+            "F2_skal":                    int(f2 * 100),
+            "Valve_F2":                   2,
+            "power":                      True,
         }

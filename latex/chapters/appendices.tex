@@ -1,0 +1,263 @@
+\chapter{WinCC Unified Tag Table (21 Tags)}
+\label{app:tags}
+
+The following table is the authoritative reference for all 21 WinCC Unified process tags
+used in this project.
+
+\begin{longtable}{@{}L{4.6cm}L{2.2cm}L{1.5cm}L{1.5cm}L{3.2cm}@{}}
+  \caption{Complete WinCC Unified tag table.}
+  \label{tab:app_tags}\\
+  \toprule
+  \textbf{Tag name} & \textbf{PLC addr.} & \textbf{Type} & \textbf{Unit} & \textbf{Description} \\
+  \midrule
+  \endfirsthead
+  \multicolumn{5}{l}{\small\itshape (continued)}\\
+  \toprule
+  \textbf{Tag name} & \textbf{PLC addr.} & \textbf{Type} & \textbf{Unit} & \textbf{Description} \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  \code{T\_hin}                  & \plcaddr{MD16}  & Real & \si{\degreeCelsius}        & Furnace inlet temperature \\
+  \code{T\_hout}                 & \plcaddr{MD12}  & Real & \si{\degreeCelsius}        & Furnace outlet temperature \\
+  \code{T\_we\_rock\_furnace}    & \plcaddr{IW300} & Int  & ADC (0--27648) & Furnace inlet raw ADC \\
+  \code{T\_wy\_Oven\_scale}      & \plcaddr{IW304} & Int  & ADC (0--27648) & Furnace outlet raw ADC \\
+  \code{Tin1\_HE1}               & \plcaddr{MD48}  & Real & \si{\degreeCelsius}        & HE hot inlet temperature \\
+  \code{Tout1\_HE1}              & \plcaddr{MD44}  & Real & \si{\degreeCelsius}        & HE hot outlet temperature \\
+  \code{Tin2\_HE1}               & \plcaddr{MD40}  & Real & \si{\degreeCelsius}        & HE cold inlet temperature \\
+  \code{Tout2\_HE1}              & \plcaddr{MD52}  & Real & \si{\degreeCelsius}        & HE cold outlet temperature \\
+  \code{Tin1\_heat\_exch1\_scale}& \plcaddr{IW112} & Int  & ADC (0--27648) & $T_{in1}$ raw ADC value \\
+  \code{Tout1\_HE1\_raw}         & \plcaddr{IW120} & Int  & ADC (0--27648) & $T_{out1}$ raw ADC value \\
+  \code{Tin2\_HE1\_raw}          & \plcaddr{IW116} & Int  & ADC (0--27648) & $T_{in2}$ raw ADC value \\
+  \code{Tout2\_HE1\_raw}         & \plcaddr{IW108} & Int  & ADC (0--27648) & $T_{out2}$ raw ADC value \\
+  \code{F1}                      & \plcaddr{MD28}  & Real & \si{\metre\cubed\per\hour} & Hot circuit flow rate \\
+  \code{F1\_SP}                  & \plcaddr{MD24}  & Real & \si{\metre\cubed\per\hour} & Hot circuit flow setpoint \\
+  \code{F1\_skal}                & \plcaddr{IW316} & Int  & ADC (0--27648) & $F_1$ raw ADC value \\
+  \code{Valve\_F1}               & \plcaddr{QW8}   & Word & 0--27648       & Hot valve command word \\
+  \code{F2}                      & \plcaddr{MD32}  & Real & \si{\metre\cubed\per\hour} & Cold circuit flow rate \\
+  \code{F2\_SP}                  & \plcaddr{MD36}  & Real & \si{\metre\cubed\per\hour} & Cold circuit flow setpoint \\
+  \code{F2\_skal}                & \plcaddr{IW204} & Int  & ADC (0--27648) & $F_2$ raw ADC value \\
+  \code{Valve\_F2}               & \plcaddr{QW4}   & Int  & 0--27648       & Cold valve command \\
+  \code{power}                   & \plcaddr{Q0.3}  & Bool & 0/1            & Furnace power (ON=1) \\
+\end{longtable}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\chapter{DB1 Structure for Snap7}
+\label{app:db1}
+
+DB1 must be configured with \textbf{Optimized block access disabled} in TIA Portal
+(Properties $\rightarrow$ Attributes $\rightarrow$ uncheck \textit{Optimized block access}).
+
+\begin{table}[H]
+  \centering
+  \caption{DB1 structure (non-optimized, absolute byte offsets).}
+  \label{tab:app_db1}
+  \begin{tabular}{@{}C{2.4cm}C{2.4cm}L{3.5cm}L{5cm}@{}}
+    \toprule
+    \textbf{Byte offset} & \textbf{TIA type} & \textbf{Variable} & \textbf{Description} \\
+    \midrule
+    DBD0  & REAL & \code{temperature}    & $T_{in1,HE1}$ (\si{\degreeCelsius}) \\
+    DBD4  & REAL & \code{flow\_rate}     & $F_1$ (\si{\metre\cubed\per\hour}) \\
+    DBD8  & REAL & \code{setpoint\_temp} & Temperature setpoint (\si{\degreeCelsius}) \\
+    DBD12 & REAL & \code{setpoint\_flow} & $F_{1,SP}$ (\si{\metre\cubed\per\hour}) \\
+    DBW16 & INT  & \code{valve\_state}   & 0=CLOSED, 1=OPEN, 2=PARTIAL \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Reading DB1 with Python Snap7:
+\begin{lstlisting}[language=Python, caption={Snap7 DB1 read (absolute byte offsets).}]
+raw = client.db_read(db_number=1, start=0, size=20)
+temperature   = snap7.util.get_real(raw,  0)   # DBD0  (4 bytes IEEE 754)
+flow_rate     = snap7.util.get_real(raw,  4)   # DBD4
+setpoint_temp = snap7.util.get_real(raw,  8)   # DBD8
+setpoint_flow = snap7.util.get_real(raw, 12)   # DBD12
+valve_state   = snap7.util.get_int( raw, 16)   # DBW16 (2 bytes INT)
+\end{lstlisting}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\chapter{Key Code Extracts}
+\label{app:code}
+
+\section*{C.1 \quad PI+P Velocity Form (\texttt{cascade\_controller.py})}
+
+\begin{lstlisting}[language=Python,
+  caption={Complete \texttt{PIplusP.update()} method with anti-windup and P-on-M.}]
+def update(self, setpoint: float, measurement: float) -> float:
+    """
+    Velocity-form PI with proportional action on measurement.
+    - No proportional kick on setpoint change.
+    - Bumpless transfer: initialise with init_output() before AUTO.
+    - Anti-windup: implicit via output clamping on last_output.
+    """
+    if self._last_meas is None:
+        self._last_meas = measurement
+    error   = setpoint - measurement
+    delta_u = (-self.Kp * (measurement - self._last_meas)
+               + (self.Kp / max(self.Ti, 0.01)) * error * self.dt)
+    clamped = max(self.out_min,
+                  min(self.out_max, self.last_output + delta_u))
+    self.last_output = clamped
+    self._last_meas  = measurement
+    return clamped
+
+def init_output(self, current_output: float, current_meas: float):
+    """Bumpless transfer initialisation."""
+    self.last_output = current_output
+    self._last_meas  = current_meas
+\end{lstlisting}
+
+\section*{C.2 \quad IMC Gain Calculation (\texttt{identification.py})}
+
+\begin{lstlisting}[language=Python,
+  caption={IMC tuning for PI controller (three aggressiveness levels).}]
+def _compute_imc(self, K: float, tau: float, theta: float) -> dict:
+    """
+    Returns aggressive / normal / conservative PI gains using IMC rules.
+    Lambda >= theta enforced (physical lower bound).
+    """
+    results = {}
+    for label, factor in [('aggressive', 0.5),
+                           ('normal',     1.0),
+                           ('conservative', 2.0)]:
+        lam = max(factor * tau, theta)        # enforce lambda >= theta
+        Kp  = round(tau / (K * (lam + theta)), 4) if K != 0 else 0.0
+        Ti  = round(tau, 1)
+        results[label] = {'Kp': Kp, 'Ti': Ti, 'lambda': round(lam, 1)}
+    return results
+\end{lstlisting}
+
+\section*{C.3 \quad Open Pipe Read (\texttt{openpipe\_connector.py})}
+
+\begin{lstlisting}[language=Python,
+  caption={Unix socket read for Open Pipe tag batch request.}]
+def _read_via_socket(self, tag_names: list) -> dict:
+    """Read multiple WinCC Unified tags in a single request."""
+    request = json.dumps({"action": "read", "tags": tag_names}) + "\n"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(2.0)
+        s.connect(self._sock_path)
+        s.sendall(request.encode())
+        response = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk or b"\n" in response:
+                break
+            response += chunk
+    return json.loads(response.split(b"\n")[0].decode())
+\end{lstlisting}
+
+\section*{C.4 \quad Poll Loop Excerpt (\texttt{main.py})}
+
+\begin{lstlisting}[language=Python,
+  caption={Open Pipe poll loop: identification has priority over cascade.}]
+def _openpipe_poll_loop():
+    while True:
+        tags  = openpipe.read_all_tags()
+        Tin1  = tags.get('Tin1_HE1',  0.0)
+        Tout2 = tags.get('Tout2_HE1', 0.0)
+
+        # Identification takes priority
+        new_sp = ident.feed(Tin1, Tout2, tags.get('F1_SP', 0.0))
+        if new_sp is not None:
+            openpipe.write_tag('F1_SP', new_sp)
+        elif cascade.mode != CascadeController.MODE_MANUAL:
+            ctrl_sp = cascade.update(Tin1, Tout2)
+            if ctrl_sp is not None:
+                openpipe.write_tag('F1_SP', ctrl_sp)
+
+        socketio.emit('process_tags', tags)
+        socketio.emit('cascade_data', cascade.get_status())
+        if ident.state not in ('idle', 'done'):
+            socketio.emit('ident_update', ident.get_status())
+
+        time.sleep(3.0)
+\end{lstlisting}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\chapter{Step Response Experimental Results}
+\label{app:results}
+
+\pendingbox{%
+  To be completed after the experimental session of 2026-05-19 with Michal.
+  Include: raw data table, step response figures, extracted parameters,
+  IMC gain table.%
+}
+
+\section*{D.1 \quad Raw Data}
+
+\begin{table}[H]
+  \centering
+  \caption{Identification raw data (values to be filled in).}
+  \label{tab:raw_data}
+  \begin{tabular}{@{}C{2cm}C{2.5cm}C{2.5cm}C{2.5cm}@{}}
+    \toprule
+    \textbf{$t$ [\si{\second}]} &
+    \textbf{$T_{in1}$ [\si{\degreeCelsius}]} &
+    \textbf{$T_{out2}$ [\si{\degreeCelsius}]} &
+    \textbf{$F_{1,SP}$ [\si{\metre\cubed\per\hour}]} \\
+    \midrule
+    0   & & & \\
+    3   & & & \\
+    6   & & & \\
+    $\vdots$ & $\vdots$ & $\vdots$ & $\vdots$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\chapter{User Manual}
+\label{app:manual}
+
+\section*{E.1 \quad Accessing the Interface}
+
+From any browser on the laboratory network (192.168.1.x subnet):
+
+\begin{table}[H]
+  \centering
+  \begin{tabular}{@{}L{4cm}L{8cm}@{}}
+    \toprule
+    \textbf{Page} & \textbf{URL} \\
+    \midrule
+    Synoptique (panel) & \code{http://192.168.1.149:5000/schema} \\
+    Cascade (engineer) & \code{http://192.168.1.149:5000/cascade} \\
+    Process tags       & \code{http://192.168.1.149:5000/process} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Replace \code{192.168.1.149} with the running PC's IP, or
+\code{192.168.1.200:30500} once Industrial Edge is deployed.
+
+\section*{E.2 \quad Running an Identification Test}
+
+\begin{enumerate}[leftmargin=*, itemsep=4pt]
+  \item Ensure the furnace has been running for $\geq$30\,min and process is at
+    steady state.
+  \item Navigate to \code{/cascade} $\rightarrow$ \textit{Identification} tab.
+  \item Confirm cascade controller is in \textbf{MANUAL} mode (check Cascade tab).
+  \item Verify the auto-filled Base $F_{1,SP}$; set Amplitude (default:
+    \SI{0.5}{\metre\cubed\per\hour}) and Duration (default: \SI{180}{\second}).
+  \item Press \textbf{Start Test} --- chart begins recording.
+  \item Wait for automatic test completion (F1\_SP is restored automatically).
+  \item Press \textbf{Apply \& Switch} on the desired IMC tuning level (Normal recommended
+    for first test).
+\end{enumerate}
+
+\section*{E.3 \quad Commissioning the Cascade Controller}
+
+\begin{enumerate}[leftmargin=*, itemsep=4pt]
+  \item After applying IMC gains, switch to the \textit{Cascade Control} tab.
+  \item Set \textbf{Inner $T_{in1,SP}$} to approximately the current $T_{in1,HE1}$
+    reading.
+  \item Press \textbf{AUTO INNER} --- inner loop activates with bumpless transfer.
+  \item Verify $T_{in1}$ holds at $T_{in1,SP}$ (expected $<$2\,\si{\degreeCelsius}
+    steady-state error).
+  \item Test inner loop by stepping $T_{in1,SP}$ up and down.
+  \item Once inner loop is validated, set \textbf{Outer $T_{out2,SP}$} to the desired
+    cold outlet temperature.
+  \item Press \textbf{AUTO FULL} --- outer P loop activates.
+  \item If $T_{out2}$ does not reach $T_{out2,SP}$ (P outer offset), trim
+    $T_{in1,SP}^{\text{base}}$ to compensate.
+  \item To return to manual: press \textbf{MANUAL} (confirmation dialog shown).
+\end{enumerate}

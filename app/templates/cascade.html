@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cascade — Procédé thermique</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html, body {
+            font-family: "Segoe UI", system-ui, sans-serif;
+            background: #f0f0f0;
+            color: #1a1a1a;
+            min-height: 100vh;
+        }
+
+        /* ── Header ── */
+        .hdr {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 10px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .hdr-left  { display: flex; align-items: center; gap: 14px; }
+        .hdr-title { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+        .hdr-right { display: flex; align-items: center; gap: 12px; font-size: 0.65rem; color: #aaa; }
+        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+        .dot.ok  { background: #4caf50; }
+        .dot.sim { background: #ff9800; }
+
+        .nav { display: flex; gap: 3px; }
+        .nav-a {
+            padding: 2px 9px;
+            font-size: 0.6rem; letter-spacing: 0.07em; text-transform: uppercase;
+            border: 1px solid #444; color: #888; text-decoration: none;
+        }
+        .nav-a:hover  { border-color: #aaa; color: #ccc; }
+        .nav-a.active { background: #fff; color: #1a1a1a; border-color: #fff; }
+
+        /* ── Layout ── */
+        .page {
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* ── Tabs ── */
+        .tabs {
+            display: flex;
+            gap: 4px;
+        }
+        .tab-btn {
+            padding: 6px 20px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            border: 1px solid #ccc;
+            background: #e8e8e8;
+            color: #666;
+            cursor: pointer;
+        }
+        .tab-btn.active {
+            background: #1a1a1a;
+            color: #fff;
+            border-color: #1a1a1a;
+        }
+
+        .tab-pane { display: none; flex-direction: column; gap: 10px; }
+        .tab-pane.active { display: flex; }
+
+        /* ── Cards ── */
+        .card {
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 12px 14px;
+        }
+        .card-title {
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.09em;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 6px;
+        }
+
+        .row { display: flex; gap: 10px; flex-wrap: wrap; }
+        .row .card { flex: 1; min-width: 220px; }
+
+        /* ── Form fields ── */
+        .field {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .field label {
+            font-size: 0.68rem;
+            color: #555;
+            width: 120px;
+            flex-shrink: 0;
+        }
+        .field input {
+            width: 90px;
+            padding: 4px 6px;
+            border: 1px solid #ccc;
+            font-size: 0.78rem;
+            font-family: inherit;
+        }
+        .field .unit {
+            font-size: 0.65rem;
+            color: #aaa;
+        }
+
+        /* ── Buttons ── */
+        .btn {
+            padding: 6px 16px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-primary { background: #1a1a1a; color: #fff; }
+        .btn-primary:hover { background: #333; }
+        .btn-primary:disabled { background: #aaa; cursor: default; }
+        .btn-danger  { background: #c62828; color: #fff; }
+        .btn-danger:hover { background: #e53935; }
+        .btn-danger:disabled { background: #e8a0a0; cursor: default; }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid #ccc;
+            color: #555;
+        }
+        .btn-outline:hover { border-color: #888; color: #222; }
+        .btn-outline.active {
+            background: #1a1a1a;
+            color: #fff;
+            border-color: #1a1a1a;
+        }
+        .btn-small {
+            padding: 3px 10px;
+            font-size: 0.6rem;
+        }
+
+        /* ── Status badge ── */
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .badge-idle    { background: #eee; color: #888; }
+        .badge-active  { background: #fff3e0; color: #e65100; }
+        .badge-done    { background: #e8f5e9; color: #2e7d32; }
+        .badge-manual  { background: #fce4ec; color: #c62828; }
+        .badge-auto    { background: #e3f2fd; color: #1565c0; }
+        .badge-cascade { background: #e8f5e9; color: #2e7d32; }
+
+        /* ── Progress bar ── */
+        .progress-wrap {
+            height: 6px;
+            background: #eee;
+            border-radius: 3px;
+            margin: 8px 0;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #1a1a1a;
+            transition: width 0.5s;
+            width: 0%;
+        }
+
+        /* ── Live values ── */
+        .live-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .live-item {
+            text-align: center;
+            padding: 6px;
+            background: #f8f8f8;
+            border: 1px solid #eee;
+        }
+        .live-label {
+            font-size: 0.58rem;
+            color: #888;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        .live-val {
+            font-size: 1.1rem;
+            font-weight: 300;
+            font-variant-numeric: tabular-nums;
+            margin-top: 2px;
+        }
+        .live-unit {
+            font-size: 0.6rem;
+            color: #aaa;
+        }
+
+        /* ── Chart container ── */
+        .chart-card {
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 12px;
+            height: 280px;
+            position: relative;
+        }
+        .chart-placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #aaa;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+
+        /* ── Results table ── */
+        .ident-kpi {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .kpi-item {
+            text-align: center;
+            padding: 10px;
+            background: #f8f8f8;
+            border: 1px solid #eee;
+        }
+        .kpi-name {
+            font-size: 0.65rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .kpi-val {
+            font-size: 1.5rem;
+            font-weight: 300;
+            font-variant-numeric: tabular-nums;
+            margin: 4px 0;
+        }
+        .kpi-unit {
+            font-size: 0.6rem;
+            color: #aaa;
+        }
+
+        .tuning-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.72rem;
+        }
+        .tuning-table th {
+            text-align: left;
+            padding: 5px 8px;
+            font-size: 0.6rem;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+            color: #888;
+            border-bottom: 1px solid #eee;
+        }
+        .tuning-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .tuning-table tr:hover td { background: #fafafa; }
+
+        /* ── Cascade schema ── */
+        .cascade-schema {
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            overflow-x: auto;
+        }
+        .cs-block {
+            text-align: center;
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            min-width: 90px;
+            font-size: 0.65rem;
+            color: #555;
+            letter-spacing: 0.04em;
+        }
+        .cs-block.sp  { border-color: #1565c0; background: #e3f2fd; }
+        .cs-block.out { border-color: #2e7d32; background: #e8f5e9; }
+        .cs-val {
+            display: block;
+            font-size: 1rem;
+            font-weight: 400;
+            font-variant-numeric: tabular-nums;
+            color: #1a1a1a;
+            margin-top: 2px;
+        }
+        .cs-ctrl {
+            text-align: center;
+            padding: 8px 14px;
+            border: 2px solid #1a1a1a;
+            background: #1a1a1a;
+            color: #fff;
+            min-width: 80px;
+            font-size: 0.65rem;
+        }
+        .cs-ctrl-name { font-weight: 700; letter-spacing: 0.06em; font-size: 0.72rem; }
+        .cs-ctrl-sub  { color: #aaa; font-size: 0.62rem; margin-top: 3px; line-height: 1.4; }
+        .cs-arrow {
+            font-size: 1.4rem;
+            color: #aaa;
+            flex-shrink: 0;
+        }
+        .feedback-row {
+            display: flex;
+            justify-content: space-around;
+            font-size: 0.62rem;
+            color: #888;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-top: none;
+            padding: 4px 20px;
+        }
+
+        /* ── Mode bar ── */
+        .mode-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 10px 14px;
+        }
+        .mode-label {
+            font-size: 0.65rem;
+            color: #888;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+            flex-shrink: 0;
+        }
+
+        /* ── Status grid ── */
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .st-item {
+            padding: 8px;
+            background: #f8f8f8;
+            border: 1px solid #eee;
+        }
+        .st-label {
+            font-size: 0.58rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .st-val {
+            font-size: 1.1rem;
+            font-weight: 300;
+            font-variant-numeric: tabular-nums;
+            margin-top: 2px;
+        }
+        .st-unit { font-size: 0.6rem; color: #aaa; }
+
+        .hidden { display: none !important; }
+        .btn-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header class="hdr">
+    <div class="hdr-left">
+        <div class="hdr-title">Procédé thermique</div>
+        <nav class="nav">
+            <a href="/" class="nav-a">Monitor</a>
+            <a href="/process" class="nav-a">Process</a>
+            <a href="/schema" class="nav-a">Synoptique</a>
+            <a href="/cascade" class="nav-a active">Cascade</a>
+            <a href="/test" class="nav-a">Test</a>
+        </nav>
+    </div>
+    <div class="hdr-right">
+        <span id="src-dot" class="dot sim"></span>
+        <span id="src-label">--</span>
+        <span id="clock">--:--:--</span>
+    </div>
+</header>
+
+<!-- ── Page ── -->
+<div class="page">
+
+    <!-- Tabs -->
+    <div class="tabs">
+        <button class="tab-btn active" onclick="showTab('ident')">Identification</button>
+        <button class="tab-btn" onclick="showTab('cascade')">Contrôle cascade</button>
+    </div>
+
+    <!-- ═══════════════════════ IDENTIFICATION TAB ═══════════════════════ -->
+    <div id="tab-ident" class="tab-pane active">
+
+        <div class="row">
+            <!-- Step configuration -->
+            <div class="card" style="max-width:300px">
+                <div class="card-title">Échelon sur F1_SP</div>
+
+                <div class="field">
+                    <label>F1_SP base</label>
+                    <input id="base-f1" type="number" step="0.1" min="0" max="9" value="3.0">
+                    <span class="unit">m³/h</span>
+                </div>
+                <div class="field">
+                    <label>Amplitude</label>
+                    <input id="step-amp" type="number" step="0.1" min="0.1" max="5" value="0.5">
+                    <span class="unit">m³/h</span>
+                </div>
+                <div class="field">
+                    <label>Durée</label>
+                    <input id="step-dur" type="number" step="10" min="30" max="600" value="120">
+                    <span class="unit">s</span>
+                </div>
+
+                <div class="btn-row">
+                    <button id="btn-start" class="btn btn-primary" onclick="startIdent()">Start</button>
+                    <button id="btn-cancel" class="btn btn-danger" onclick="cancelIdent()" disabled>Annuler</button>
+                </div>
+            </div>
+
+            <!-- Status -->
+            <div class="card" style="flex:1">
+                <div class="card-title">État</div>
+                <span id="ident-badge" class="badge badge-idle">IDLE</span>
+                <div class="progress-wrap">
+                    <div id="progress-fill" class="progress-fill"></div>
+                </div>
+                <div style="font-size:0.65rem; color:#aaa; margin-bottom:8px">
+                    <span id="ident-info">En attente de démarrage</span>
+                </div>
+                <div class="live-grid">
+                    <div class="live-item">
+                        <div class="live-label">Tin1</div>
+                        <div class="live-val" id="l-tin1">--</div>
+                        <div class="live-unit">°C</div>
+                    </div>
+                    <div class="live-item">
+                        <div class="live-label">Tout2</div>
+                        <div class="live-val" id="l-tout2">--</div>
+                        <div class="live-unit">°C</div>
+                    </div>
+                    <div class="live-item">
+                        <div class="live-label">F1_SP</div>
+                        <div class="live-val" id="l-f1sp">--</div>
+                        <div class="live-unit">m³/h</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chart -->
+        <div class="chart-card">
+            <div id="chart-placeholder" class="chart-placeholder">Démarrer un test d'échelon pour afficher la réponse</div>
+            <canvas id="ident-chart" style="display:none"></canvas>
+        </div>
+
+        <!-- Results -->
+        <div id="results-card" class="card hidden">
+            <div class="card-title">Résultats d'identification</div>
+
+            <div class="ident-kpi">
+                <div class="kpi-item">
+                    <div class="kpi-name">Gain statique K</div>
+                    <div class="kpi-val" id="r-K">--</div>
+                    <div class="kpi-unit">°C / (m³/h)</div>
+                </div>
+                <div class="kpi-item">
+                    <div class="kpi-name">Constante de temps τ</div>
+                    <div class="kpi-val" id="r-tau">--</div>
+                    <div class="kpi-unit">s</div>
+                </div>
+                <div class="kpi-item">
+                    <div class="kpi-name">Retard pur θ</div>
+                    <div class="kpi-val" id="r-theta">--</div>
+                    <div class="kpi-unit">s</div>
+                </div>
+            </div>
+
+            <table class="tuning-table">
+                <thead>
+                    <tr>
+                        <th>Réglage IMC</th>
+                        <th>Kp</th>
+                        <th>Ti (s)</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Agressif (λ = 0.5τ)</td>
+                        <td id="t-kp-agg">--</td>
+                        <td id="t-ti-agg">--</td>
+                        <td><button class="btn btn-outline btn-small" onclick="applyGains('aggressive')">Appliquer</button></td>
+                    </tr>
+                    <tr>
+                        <td>Normal (λ = τ)</td>
+                        <td id="t-kp-nor">--</td>
+                        <td id="t-ti-nor">--</td>
+                        <td><button class="btn btn-outline btn-small" onclick="applyGains('normal')">Appliquer</button></td>
+                    </tr>
+                    <tr>
+                        <td>Conservatif (λ = 2τ)</td>
+                        <td id="t-kp-con">--</td>
+                        <td id="t-ti-con">--</td>
+                        <td><button class="btn btn-outline btn-small" onclick="applyGains('conservative')">Appliquer</button></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="btn-row" style="margin-top:14px">
+                <button class="btn btn-outline btn-small" onclick="showTab('cascade')">
+                    Aller au contrôle cascade →
+                </button>
+            </div>
+        </div>
+
+    </div><!-- /tab-ident -->
+
+    <!-- ═══════════════════════ CASCADE TAB ═══════════════════════ -->
+    <div id="tab-cascade" class="tab-pane">
+
+        <!-- Visual schema -->
+        <div class="cascade-schema">
+            <div class="cs-block sp">
+                Tout2_SP<br>
+                <span class="cs-val" id="cs-tout2sp">50.0 °C</span>
+            </div>
+            <div class="cs-arrow">→</div>
+            <div class="cs-ctrl">
+                <div class="cs-ctrl-name">P ext</div>
+                <div class="cs-ctrl-sub">Kp = <span id="cs-kpout">2.0</span></div>
+            </div>
+            <div class="cs-arrow">→</div>
+            <div class="cs-block sp">
+                Tin1_SP<br>
+                <span class="cs-val" id="cs-tin1sp-cmd">60.0 °C</span>
+            </div>
+            <div class="cs-arrow">→</div>
+            <div class="cs-ctrl">
+                <div class="cs-ctrl-name">PI+P int</div>
+                <div class="cs-ctrl-sub">
+                    Kp = <span id="cs-kpin">1.0</span><br>
+                    Ti = <span id="cs-tiin">60</span> s
+                </div>
+            </div>
+            <div class="cs-arrow">→</div>
+            <div class="cs-block out">
+                F1_SP out<br>
+                <span class="cs-val" id="cs-f1sp-out">-- m³/h</span>
+            </div>
+        </div>
+        <div class="feedback-row">
+            <span>↑ Tout2 = <span id="cs-tout2-fb">--</span> °C</span>
+            <span>↑ Tin1 = <span id="cs-tin1-fb">--</span> °C</span>
+        </div>
+
+        <!-- Controls -->
+        <div class="row">
+            <div class="card">
+                <div class="card-title">Boucle externe (Tout2)</div>
+                <div class="field">
+                    <label>Tout2_SP</label>
+                    <input id="tout2-sp-in" type="number" step="1" min="0" max="200" value="50">
+                    <span class="unit">°C</span>
+                </div>
+                <div class="field">
+                    <label>Kp extérieur</label>
+                    <input id="kp-out-in" type="number" step="0.1" min="0" value="2.0">
+                </div>
+                <div class="btn-row">
+                    <button class="btn btn-primary btn-small" onclick="updateOuterParams()">Appliquer</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Boucle interne (Tin1)</div>
+                <div class="field">
+                    <label>Tin1_SP</label>
+                    <input id="tin1-sp-in" type="number" step="1" min="0" max="300" value="60">
+                    <span class="unit">°C</span>
+                </div>
+                <div class="field">
+                    <label>Kp intérieur</label>
+                    <input id="kp-in-in" type="number" step="0.01" min="0" value="1.0">
+                </div>
+                <div class="field">
+                    <label>Ti intérieur</label>
+                    <input id="ti-in-in" type="number" step="1" min="1" value="60">
+                    <span class="unit">s</span>
+                </div>
+                <div class="btn-row">
+                    <button class="btn btn-primary btn-small" onclick="updateInnerParams()">Appliquer</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mode buttons -->
+        <div class="mode-bar">
+            <span class="mode-label">Mode :</span>
+            <button id="mode-manual"     class="btn btn-outline active" onclick="setMode('manual')">Manuel</button>
+            <button id="mode-auto-inner" class="btn btn-outline"        onclick="setMode('auto_inner')">Auto boucle interne</button>
+            <button id="mode-auto-full"  class="btn btn-outline"        onclick="setMode('auto_full')">Auto cascade complète</button>
+        </div>
+
+        <!-- Status -->
+        <div class="card">
+            <div class="card-title">État du contrôleur — <span id="cascade-mode-badge" class="badge badge-manual">MANUEL</span></div>
+            <div class="status-grid">
+                <div class="st-item">
+                    <div class="st-label">Tin1</div>
+                    <div class="st-val" id="st-tin1">--</div>
+                </div>
+                <div class="st-item">
+                    <div class="st-label">Tout2</div>
+                    <div class="st-val" id="st-tout2">--</div>
+                </div>
+                <div class="st-item">
+                    <div class="st-label">Tin1_SP cmd</div>
+                    <div class="st-val" id="st-tin1sp-cmd">--</div>
+                </div>
+                <div class="st-item">
+                    <div class="st-label">F1_SP sortie</div>
+                    <div class="st-val" id="st-f1sp-out">--</div>
+                </div>
+                <div class="st-item">
+                    <div class="st-label">Erreur Tin1</div>
+                    <div class="st-val" id="st-err-tin1">--</div>
+                </div>
+                <div class="st-item">
+                    <div class="st-label">Erreur Tout2</div>
+                    <div class="st-val" id="st-err-tout2">--</div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /tab-cascade -->
+
+</div><!-- /page -->
+
+<script>
+// ── Socket.IO ─────────────────────────────────────────────────────────────────
+const socket = io();
+
+socket.on('process_tags', (d) => {
+    setText('l-tin1',  fmt1(d.Tin1_wymiennik1));
+    setText('l-tout2', fmt1(d.Tout2_wymiennik1));
+    setText('l-f1sp',  fmt2(d.F1_SP));
+    const sim = d.source !== 'OPENPIPE';
+    el('src-dot').className   = 'dot ' + (sim ? 'sim' : 'ok');
+    el('src-label').textContent = d.source || '--';
+    el('clock').textContent   = (d.timestamp || '').slice(11, 19);
+});
+
+socket.on('ident_update', (d) => {
+    updateIdentStatus(d.status);
+    if (d.chart && d.chart.length > 0) updateChart(d.chart);
+});
+
+socket.on('cascade_data', (d) => {
+    updateCascadeStatus(d);
+});
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function showTab(name) {
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    el('tab-' + name).classList.add('active');
+    const btns = document.querySelectorAll('.tab-btn');
+    const idx  = name === 'ident' ? 0 : 1;
+    btns[idx].classList.add('active');
+}
+
+// ── Chart.js setup ────────────────────────────────────────────────────────────
+let identChart = null;
+let chartData  = { Tin1: [], Tout2: [], F1_SP: [] };
+
+function initChart() {
+    const canvas = el('ident-chart');
+    el('chart-placeholder').style.display = 'none';
+    canvas.style.display = 'block';
+
+    if (identChart) { identChart.destroy(); }
+
+    identChart = new Chart(canvas, {
+        type: 'line',
+        data: {
+            datasets: [
+                {
+                    label: 'Tin1 (°C)',
+                    data: [],
+                    borderColor: '#e53935',
+                    backgroundColor: 'transparent',
+                    tension: 0.3,
+                    pointRadius: 2,
+                    yAxisID: 'yT',
+                },
+                {
+                    label: 'Tout2 (°C)',
+                    data: [],
+                    borderColor: '#fb8c00',
+                    backgroundColor: 'transparent',
+                    tension: 0.3,
+                    pointRadius: 2,
+                    yAxisID: 'yT',
+                    borderDash: [4, 3],
+                },
+                {
+                    label: 'F1_SP (m³/h)',
+                    data: [],
+                    borderColor: '#1565c0',
+                    backgroundColor: 'transparent',
+                    tension: 0.0,
+                    pointRadius: 2,
+                    yAxisID: 'yF',
+                    stepped: 'after',
+                },
+            ]
+        },
+        options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    labels: { font: { size: 11 }, boxWidth: 20 }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'linear',
+                    title: { display: true, text: 'Temps depuis démarrage (s)', font: { size: 11 } },
+                    ticks: { font: { size: 10 } },
+                },
+                yT: {
+                    type: 'linear',
+                    position: 'left',
+                    title: { display: true, text: 'Température (°C)', font: { size: 11 } },
+                    ticks: { font: { size: 10 } },
+                },
+                yF: {
+                    type: 'linear',
+                    position: 'right',
+                    title: { display: true, text: 'F1_SP (m³/h)', font: { size: 11 } },
+                    ticks: { font: { size: 10 } },
+                    grid: { drawOnChartArea: false },
+                },
+            }
+        }
+    });
+}
+
+function updateChart(chartPoints) {
+    if (!identChart) initChart();
+    identChart.data.datasets[0].data = chartPoints.map(p => ({ x: p.t, y: p.Tin1  }));
+    identChart.data.datasets[1].data = chartPoints.map(p => ({ x: p.t, y: p.Tout2 }));
+    identChart.data.datasets[2].data = chartPoints.map(p => ({ x: p.t, y: p.F1_SP }));
+    identChart.update('none');
+}
+
+// ── Identification UI ─────────────────────────────────────────────────────────
+function startIdent() {
+    const payload = {
+        base_F1_SP:  parseFloat(el('base-f1').value),
+        amplitude:   parseFloat(el('step-amp').value),
+        duration_s:  parseFloat(el('step-dur').value),
+    };
+    post('/api/identification/start', payload)
+        .then(r => {
+            if (!r.ok) return r.json().then(j => { alert(j.error); });
+            el('btn-start').disabled  = true;
+            el('btn-cancel').disabled = false;
+            if (identChart) { identChart.destroy(); identChart = null; }
+            el('chart-placeholder').style.display = 'flex';
+            el('ident-chart').style.display       = 'none';
+            el('results-card').classList.add('hidden');
+        });
+}
+
+function cancelIdent() {
+    post('/api/identification/cancel', {})
+        .then(() => {
+            el('btn-start').disabled  = false;
+            el('btn-cancel').disabled = true;
+        });
+}
+
+function updateIdentStatus(s) {
+    const badge = el('ident-badge');
+    const fill  = el('progress-fill');
+    const info  = el('ident-info');
+
+    if (s.state === 'idle') {
+        badge.className = 'badge badge-idle';
+        badge.textContent = 'IDLE';
+        info.textContent  = 'En attente de démarrage';
+        fill.style.width  = '0%';
+        el('btn-start').disabled  = false;
+        el('btn-cancel').disabled = true;
+
+    } else if (s.state === 'pre_step') {
+        badge.className = 'badge badge-active';
+        badge.textContent = 'PRÉ-ÉCHELON';
+        info.textContent  = `Mesure baseline... (${s.n_samples}/${5} échantillons)`;
+        fill.style.width  = `${Math.min(100, (s.n_samples / 5) * 20)}%`;
+        el('btn-start').disabled  = true;
+        el('btn-cancel').disabled = false;
+
+    } else if (s.state === 'step') {
+        badge.className = 'badge badge-active';
+        badge.textContent = 'ÉCHELON ACTIF';
+        const pct = Math.min(100, (s.elapsed_s / s.duration_s) * 100);
+        fill.style.width = `${pct}%`;
+        info.textContent = `F1_SP = ${fmt2(s.step_F1)} m³/h — ${Math.round(s.elapsed_s)}s / ${s.duration_s}s`;
+        el('btn-start').disabled  = true;
+        el('btn-cancel').disabled = false;
+
+    } else if (s.state === 'done') {
+        badge.className = 'badge badge-done';
+        badge.textContent = 'TERMINÉ';
+        fill.style.width  = '100%';
+        info.textContent  = 'Identification terminée';
+        el('btn-start').disabled  = false;
+        el('btn-cancel').disabled = true;
+        if (s.result && !s.result.error) showResults(s.result);
+    }
+}
+
+function showResults(r) {
+    setText('r-K',     r.K     ?? '--');
+    setText('r-tau',   r.tau   ?? '--');
+    setText('r-theta', r.theta ?? '--');
+    const t = r.tuning || {};
+    setText('t-kp-agg', (t.aggressive   || {}).Kp ?? '--');
+    setText('t-ti-agg', (t.aggressive   || {}).Ti ?? '--');
+    setText('t-kp-nor', (t.normal       || {}).Kp ?? '--');
+    setText('t-ti-nor', (t.normal       || {}).Ti ?? '--');
+    setText('t-kp-con', (t.conservative || {}).Kp ?? '--');
+    setText('t-ti-con', (t.conservative || {}).Ti ?? '--');
+    el('results-card').classList.remove('hidden');
+}
+
+function applyGains(level) {
+    const Kp = parseFloat(el('t-kp-' + level.slice(0, 3)).textContent);
+    const Ti = parseFloat(el('t-ti-' + level.slice(0, 3)).textContent);
+    if (isNaN(Kp) || isNaN(Ti)) return;
+    el('kp-in-in').value = Kp;
+    el('ti-in-in').value = Ti;
+    showTab('cascade');
+    post('/api/cascade/params', { inner_Kp: Kp, inner_Ti: Ti }).then(() => {
+        flash('Gains appliqués au contrôleur interne');
+    });
+}
+
+// ── Cascade UI ────────────────────────────────────────────────────────────────
+function setMode(mode) {
+    post('/api/cascade/mode', { mode }).then(r => r.json()).then(d => {
+        if (!d.ok) { alert(d.error); }
+    });
+}
+
+function updateOuterParams() {
+    post('/api/cascade/setpoint', { Tout2_SP: parseFloat(el('tout2-sp-in').value) });
+    post('/api/cascade/params',   { outer_Kp: parseFloat(el('kp-out-in').value) });
+}
+
+function updateInnerParams() {
+    post('/api/cascade/setpoint', { Tin1_SP: parseFloat(el('tin1-sp-in').value) });
+    post('/api/cascade/params',   {
+        inner_Kp: parseFloat(el('kp-in-in').value),
+        inner_Ti: parseFloat(el('ti-in-in').value),
+    });
+}
+
+function updateCascadeStatus(d) {
+    // Schema
+    setText('cs-tout2sp',    fmt1(d.Tout2_SP) + ' °C');
+    setText('cs-tin1sp-cmd', fmt1(d.Tin1_SP_cmd) + ' °C');
+    setText('cs-f1sp-out',   fmt2(d.F1_SP_out) + ' m³/h');
+    setText('cs-kpout',      d.outer_Kp);
+    setText('cs-kpin',       d.inner_Kp);
+    setText('cs-tiin',       d.inner_Ti);
+    setText('cs-tout2-fb',   d.Tout2 != null ? fmt1(d.Tout2) : '--');
+    setText('cs-tin1-fb',    d.Tin1  != null ? fmt1(d.Tin1)  : '--');
+
+    // Mode buttons
+    ['manual','auto-inner','auto-full'].forEach(m => {
+        el('mode-' + m).classList.remove('active');
+    });
+    const modeMap = { manual: 'manual', auto_inner: 'auto-inner', auto_full: 'auto-full' };
+    const btnId = 'mode-' + (modeMap[d.mode] || 'manual');
+    el(btnId).classList.add('active');
+
+    // Badge
+    const badge = el('cascade-mode-badge');
+    if (d.mode === 'manual')      { badge.className = 'badge badge-manual';  badge.textContent = 'MANUEL'; }
+    else if (d.mode === 'auto_inner') { badge.className = 'badge badge-auto'; badge.textContent = 'AUTO INTERNE'; }
+    else                           { badge.className = 'badge badge-cascade'; badge.textContent = 'CASCADE COMPLÈTE'; }
+
+    // Status grid
+    setText('st-tin1',       d.Tin1      != null ? fmt1(d.Tin1) + ' °C'    : '--');
+    setText('st-tout2',      d.Tout2     != null ? fmt1(d.Tout2) + ' °C'   : '--');
+    setText('st-tin1sp-cmd', fmt1(d.Tin1_SP_cmd) + ' °C');
+    setText('st-f1sp-out',   fmt2(d.F1_SP_out)   + ' m³/h');
+    setText('st-err-tin1',   d.err_Tin1  != null ? fmt1(d.err_Tin1) + ' °C' : '--');
+    setText('st-err-tout2',  d.err_Tout2 != null ? fmt1(d.err_Tout2) + ' °C' : '--');
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function el(id) { return document.getElementById(id); }
+function setText(id, val) { const e = el(id); if (e) e.textContent = val; }
+function fmt1(v) { return v != null ? parseFloat(v).toFixed(1) : '--'; }
+function fmt2(v) { return v != null ? parseFloat(v).toFixed(2) : '--'; }
+
+function post(url, body) {
+    return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+}
+
+function flash(msg) {
+    const old = document.querySelector('.flash-msg');
+    if (old) old.remove();
+    const div = document.createElement('div');
+    div.className = 'flash-msg';
+    div.style.cssText = 'position:fixed;bottom:16px;right:16px;background:#1a1a1a;color:#fff;padding:8px 16px;font-size:0.72rem;z-index:999';
+    div.textContent = msg;
+    document.body.appendChild(div);
+    setTimeout(() => div.remove(), 2500);
+}
+</script>
+</body>
+</html>

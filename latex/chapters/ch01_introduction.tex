@@ -1,0 +1,135 @@
+\chapter{Introduction}
+
+\section{Industrial Context}
+
+Thermal process control is ubiquitous in modern industry. Whether in chemical reactors,
+food processing lines, pharmaceutical production, or power generation systems, the ability
+to regulate temperatures precisely and reliably directly determines product quality, energy
+efficiency, and process safety. A plate heat exchanger, for example, appears at every scale
+of industrial production: from pasteurisation of beverages to cooling of power electronics
+and conditioning of building HVAC systems.
+
+The supervision of such processes has historically relied on dedicated SCADA
+(Supervisory Control and Data Acquisition) systems — proprietary software suites
+connected to programmable logic controllers via industrial fieldbus protocols. While reliable
+and certified, classical SCADA systems carry significant costs in licensing, hardware, and
+engineering time. Their interfaces, designed for control-room workstations, are not naturally
+suited to the web-connected, multi-device environments that modern facilities increasingly
+demand.
+
+Over the past decade, the convergence of industrial automation and information technology
+has given rise to a new paradigm often called Industrial~IoT (IIoT) or Industry~4.0.
+In this paradigm, PLCs and sensors publish data to web-accessible services; dashboards run
+in standard browsers; and control logic can be deployed as containerised software on hardware
+directly integrated into the control cabinet or operator panel. Siemens' Industrial Edge
+platform is a concrete realisation of this vision: it allows Docker containers to run natively
+on a SIMATIC Unified panel, inches from the process they supervise.
+
+This project is situated at this intersection. The installation used is a laboratory-scale
+thermal rig at ICAM Engineering School, equipped with a Siemens S7-1500 PLC, a plate heat
+exchanger, an electric furnace, and a SIMATIC Unified 7\textquotedblright{} touch panel.
+It provides a representative testbed for exploring how modern web technologies---Python,
+Flask, Socket.IO, Chart.js, Docker---can be combined with an industrial-grade controller
+to deliver a complete supervision and control solution without the cost or rigidity of a
+classical SCADA system.
+
+\section{Problem Statement}
+
+The installation under study is a plate heat exchanger in which a hot fluid (circuit~F1),
+pre-heated by an electric furnace, transfers heat to a cold counter-current fluid
+(circuit~F2). The primary control objective is to maintain the cold outlet temperature
+$T_{out2,HE1}$ at a desired setpoint, despite disturbances arising from variations in
+furnace temperature or cold circuit flow rate.
+
+A straightforward approach would be to apply a single PID controller closing the loop
+directly around $T_{out2,HE1}$ by manipulating the hot flow setpoint $F_{1,SP}$.
+However, this approach faces a fundamental limitation: the dynamic path from $F_{1,SP}$
+to $T_{out2,HE1}$ passes through two sequential processes --- the furnace
+($F_{1,SP} \rightarrow T_{in1,HE1}$) and the heat exchanger
+($T_{in1,HE1} \rightarrow T_{out2,HE1}$). The combined transfer function exhibits a
+relatively large apparent dead time and a long settling time. A controller tuned
+aggressively enough to achieve fast setpoint tracking will tend to oscillate; one tuned
+conservatively will be too slow to reject disturbances before they affect $T_{out2}$.
+
+\textit{Cascade control} offers an elegant solution to this problem. By introducing an
+intermediate measurement~--- the heat exchanger hot inlet temperature $T_{in1,HE1}$~---
+and dedicating a fast inner control loop to regulate it, disturbances in the hot circuit
+are corrected before they propagate to the cold outlet. An outer loop then adjusts the
+$T_{in1}$ setpoint to guide $T_{out2}$ toward the desired value. This structure improves
+both setpoint tracking and disturbance rejection compared to a single-loop strategy.
+
+A second problem addressed is the absence of any web-based supervision interface for this
+installation. Operators currently have no real-time visibility into the process state from
+a network-connected device. The panel displays a static WinCC Unified screen, but no data
+logging, trend charts, or remote accessibility exist. Building such an interface, deployable
+both on a PC and directly on the panel via Industrial Edge, represents a significant
+operational improvement.
+
+\section{Objectives}
+
+This project pursues three main objectives:
+
+\begin{enumerate}[leftmargin=*, itemsep=4pt]
+
+  \item \textbf{Real-time web supervision.}
+    Design and implement a web application that communicates with the S7-1500 PLC in real
+    time, displays all relevant process variables (temperatures, flow rates, valve positions,
+    furnace state), provides setpoint controls, and logs data to a persistent file. The
+    interface must be accessible both from a workstation and from the embedded browser of
+    the SIMATIC Unified 7\textquotedblright{} panel.
+
+  \item \textbf{Experimental process identification.}
+    Conduct an open-loop step-response test on the inner process ($F_{1,SP} \rightarrow
+    T_{in1,HE1}$) to extract the parameters of a First-Order Plus Time Delay (FOPTD)
+    model. Use these parameters to calculate PI controller gains according to Internal Model
+    Control (IMC) tuning rules, providing three levels of aggressiveness for the engineer.
+
+  \item \textbf{Cascade control implementation.}
+    Implement a cascade controller in Python comprising: (a)~an inner PI loop with
+    proportional action on measurement (PI+P), regulating $T_{in1,HE1}$ by manipulating
+    $F_{1,SP}$; and (b)~an outer proportional controller, converting a $T_{out2,HE1}$
+    setpoint into a $T_{in1,HE1}$ setpoint. The implementation must include bumpless mode
+    transfer, anti-windup, and a three-mode operating interface (Manual / Auto-Inner /
+    Auto-Full).
+
+\end{enumerate}
+
+\section{Thesis Structure}
+
+\textbf{Chapter~2} describes the physical installation: the electric furnace, the plate
+heat exchanger, instrumentation, and the control objectives derived from the process physics.
+
+\textbf{Chapter~3} covers the Siemens S7-1500 PLC, its memory organisation and scan cycle,
+TIA Portal V18 configuration, WinCC Unified on the 7\textquotedblright{} panel, the Open
+Pipe communication mechanism, and Industrial Edge deployment.
+
+\textbf{Chapter~4} presents the software architecture: technology choices, the multi-threaded
+Flask application, the two PLC communication layers (Snap7 and Open Pipe), real-time
+data flow via Socket.IO, the REST API, and the four web interface pages.
+
+\textbf{Chapter~5} develops the theory of FOPTD process identification and IMC tuning,
+then presents the experimental protocol and results.
+
+\textbf{Chapter~6} details the cascade control design: inner PI+P controller (velocity
+form, bumpless transfer, anti-windup), outer proportional controller, mode state machine,
+and experimental validation.
+
+\textbf{Chapter~7} describes the supervision interface design: the panel-optimised P\&ID
+synoptic and the cascade commissioning page.
+
+\textbf{Chapter~8} concludes with a summary of contributions, assessment of results,
+current limitations, and perspectives.
+
+\section{Scope and Limitations}
+
+This project focuses on the HE-001 plate heat exchanger installation at ICAM. The
+identification and closed-loop control work is limited to the inner process
+($F_{1,SP} \rightarrow T_{in1,HE1}$). The outer loop uses a proportional controller
+whose gain is set manually; full outer loop identification is left for future work.
+
+The web application is implemented as a proof-of-concept demonstrator with an emphasis
+on functionality and real-time performance. It does not include industrial certification
+(IEC~61508/61511), formal safety interlocks, or redundancy mechanisms. The Open Pipe
+communication protocol is validated against the available Siemens documentation; full
+end-to-end validation with the WinCC Unified runtime on the panel is pending Industrial
+Edge licence acquisition.

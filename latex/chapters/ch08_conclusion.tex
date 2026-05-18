@@ -1,0 +1,106 @@
+\chapter{Conclusion}
+
+\section{Summary of Contributions}
+
+This project has delivered three interconnected contributions to the supervision and control
+of the ICAM thermal process installation.
+
+\paragraph{Real-time web supervision.}
+A Docker-based Flask application communicates with the Siemens S7-1500 PLC via two
+complementary protocols: Snap7 for direct data block access (DB1) and Siemens Open Pipe for
+WinCC Unified tag exchange over a Unix socket. The application provides four web pages
+accessible on the laboratory network: a full-screen P\&ID synoptique optimised for the
+7\textquotedblright{} SIMATIC Unified touch panel, a cascade identification and commissioning
+page for the engineer, a debug process tag monitor, and a historical trend chart with CSV
+export. Socket.IO delivers real-time updates to all connected clients every 3\,s without
+explicit polling.
+
+\paragraph{Experimental process identification.}
+An open-loop step-response identification experiment has been designed, implemented, and
+conducted on the inner process ($F_{1,SP} \rightarrow T_{in1,HE1}$). The \code{StepIdentifier}
+class automates the three-phase test (baseline averaging, step application, FOPTD analysis),
+extracts the parameters $K$, $\tau$, $\theta$ by the 63.2\,\% method, and immediately
+calculates IMC-tuned PI gains at three aggressiveness levels. The engineer can apply any
+tuning level with a single click from the web interface.
+
+\paragraph{Cascade PI+P controller.}
+A cascade controller has been implemented in Python with: an inner PI loop in velocity
+form with proportional action on measurement (bumpless transfer, implicit anti-windup);
+an outer proportional controller driving the cold outlet temperature setpoint; and a
+three-mode state machine (Manual / Auto-Inner / Auto-Full) with safe mode transitions.
+The controller runs in a background thread and writes $F_{1,SP}$ to the PLC via Open Pipe
+every 3\,s.
+
+\section{Results Assessment}
+
+\pendingbox{%
+  To be completed after experimental sessions: identification results ($K$, $\tau$, $\theta$),
+  closed-loop step response metrics, and cascade steady-state performance.%
+}
+
+The web supervision interface has been verified operationally: the Synoptique renders
+correctly in the panel browser, Socket.IO connectivity is established, and the identification
+workflow has been validated in simulation mode. The cascade controller mode state machine,
+bumpless transfer, and anti-windup mechanisms have been verified through software testing.
+
+\section{Limitations}
+\label{sec:limitations}
+
+\begin{description}[leftmargin=2cm, style=nextline, itemsep=6pt]
+
+  \item[3-second sampling period]
+    The Open Pipe poll rate of \SI{3}{\second} limits identification resolution to
+    $\pm\SI{3}{\second}$ on both $\tau$ and $\theta$. For processes with dead times
+    shorter than $\sim\SI{6}{\second}$, this may be insufficient for accurate IMC tuning.
+    For the current thermal process ($\theta \gg \SI{6}{\second}$ expected), the limitation
+    is not critical.
+
+  \item[P outer loop offset]
+    The outer proportional controller introduces a non-zero steady-state error in
+    $T_{out2,HE1}$ (Section~6.3.2). Precise regulation requires either manual trimming of
+    $T_{in1,SP}^{\text{base}}$ or an upgrade to a PI outer loop.
+
+  \item[Open Pipe validation]
+    The Open Pipe communication is implemented based on the documented JSON protocol and
+    tested in simulation mode. Full end-to-end validation with the WinCC Unified runtime
+    on the panel is pending Industrial Edge licence acquisition.
+
+  \item[No PLC-side safety interlocks]
+    The web application does not implement hardware-level safety interlocks (high-temperature
+    cutoff, flow-loss detection). Process safety relies entirely on the TIA Portal program.
+    This is acceptable for a laboratory demonstrator but would need to be addressed for
+    any production deployment.
+
+\end{description}
+
+\section{Perspectives}
+\label{sec:perspectives}
+
+\begin{description}[leftmargin=2cm, style=nextline, itemsep=6pt]
+
+  \item[Outer loop PI upgrade]
+    Once the inner loop is validated, a step-response identification experiment on the
+    outer process ($T_{in1} \rightarrow T_{out2}$) would yield $K_2$, $\tau_2$, $\theta_2$.
+    These parameters enable IMC tuning of a PI outer controller, eliminating the
+    steady-state $T_{out2}$ offset without manual trimming.
+
+  \item[Faster sampling]
+    Reducing the Open Pipe poll rate from 3\,s to 1\,s (by offloading controller
+    computation to a separate thread) would improve identification resolution and increase
+    the achievable inner loop bandwidth.
+
+  \item[Alarm management]
+    Adding configurable alarm thresholds (high $T_{hin}$, low $F_1$, valve fault detection)
+    with Socket.IO broadcast events would improve operator safety awareness.
+
+  \item[Complete Industrial Edge deployment]
+    Obtaining Industrial Edge licence credentials and completing the panel deployment would
+    realise the original vision of an embedded supervision interface, independent of the
+    development PC.
+
+  \item[Data analytics]
+    The append-only CSV log provides raw data but no analysis. A lightweight analytics
+    endpoint (trend statistics, energy balance, identification quality metrics) would
+    increase the value of the logged data.
+
+\end{description}
