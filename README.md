@@ -47,7 +47,7 @@ flowchart LR
 ```
 
 Le four chauffe le flux F1 → le flux chaud cède sa chaleur au flux froid dans l'échangeur (contre-courant).  
-**Régulation :** PI+P sur Tin1 (variable manipulée : F1) · Cascade Tout2 (en développement)
+**Régulation :** PI+P sur Tin1 (variable manipulée : F1) · Cascade Tout2 (boucle externe)
 
 ---
 
@@ -76,6 +76,7 @@ open http://localhost:5000/schema
 | Route | Description |
 |-------|-------------|
 | [`/schema`](http://localhost:5000/schema) | **Synoptique** — schéma P&ID plein écran, valeurs live, consignes tactiles |
+| [`/cascade`](http://localhost:5000/cascade) | **Cascade** — identification FOPTD, tuning IMC, contrôle cascade (outil ingénieur) |
 | [`/`](http://localhost:5000) | **Monitor** — graphiques temps réel, alarmes multi-niveaux, export CSV |
 | [`/process`](http://localhost:5000/process) | **Process** — 21 tags WinCC Unified (Four · Éch.1 · Éch.2) |
 | [`/test`](http://localhost:5000/test) | **Test DB** — lecture/écriture variables PLC brutes |
@@ -94,12 +95,19 @@ graph TD
     OP --> MAIN
     SIM --> MAIN
 
+    MAIN -->|cascade_data| CC[cascade_controller.py<br/>PI+P boucle interne]
+    MAIN -->|ident_update| ID[identification.py<br/>Step test + IMC]
+    CC --> MAIN
+    ID --> MAIN
+
     MAIN -->|process_data| UI1[Monitor /]
     MAIN -->|process_tags| UI2[Synoptique /schema]
     MAIN -->|process_tags| UI3[Process /process]
+    MAIN -->|cascade_data| UI4[Cascade /cascade]
     MAIN --> LOG[logger.py<br/>CSV logs]
 
     style UI2 fill:#ff9800,color:#fff
+    style UI4 fill:#1565c0,color:#fff
     style MAIN fill:#1a1a1a,color:#fff
 ```
 
@@ -109,18 +117,37 @@ graph TD
 ```
 project-s7/
 ├── app/
-│   ├── main.py                  # Flask + Socket.IO + threads background
-│   ├── plc_connector.py         # Interface Snap7 → S7-1500 (TCP)
-│   ├── openpipe_connector.py    # Interface Open Pipe → WinCC Unified (21 tags)
-│   ├── thermal_model.py         # Simulation fallback (1er ordre, bruit gaussien)
-│   ├── logger.py                # CSV append-only logger
+│   ├── main.py                   # Flask + Socket.IO + threads background
+│   ├── plc_connector.py          # Interface Snap7 → S7-1500 (TCP)
+│   ├── openpipe_connector.py     # Interface Open Pipe → WinCC Unified (21 tags)
+│   ├── cascade_controller.py     # Contrôleur PI+P boucle interne/externe
+│   ├── identification.py         # Step test automatisé + identification FOPTD
+│   ├── thermal_model.py          # Simulation fallback (1er ordre, bruit gaussien)
+│   ├── logger.py                 # CSV append-only logger
 │   └── templates/
-│       ├── schema.html          # Synoptique P&ID (page principale panel)
-│       ├── index.html           # Monitor (charts, PID, alarmes)
-│       ├── process.html         # 21 tags WinCC
-│       └── test.html            # Test DB PLC
-├── docker-compose.yml           # Dev / Raspberry Pi
-├── docker-compose.edge.yml      # Production → Simatic Edge Panel
+│       ├── schema.html           # Synoptique P&ID (page principale panel)
+│       ├── cascade.html          # Identification + contrôle cascade (ingénieur)
+│       ├── index.html            # Monitor (charts, PID, alarmes)
+│       ├── process.html          # 21 tags WinCC
+│       └── test.html             # Test DB PLC
+├── docs/                         # Documentation
+│   ├── ARCHITECTURE.md
+│   ├── DEPLOYMENT_OPTIONS.md
+│   ├── IMPROVEMENTS.md
+│   ├── LAB_DEPLOY_CHECKLIST.md
+│   └── LANCER_LE_TEST.md
+├── latex/                        # Sources rapport de thèse (LaTeX)
+│   ├── main.tex
+│   ├── chapters/
+│   ├── figures/
+│   └── references.bib
+├── scripts/                      # Scripts déploiement
+│   ├── deploy_to_pi.sh
+│   ├── deploy_fast.sh
+│   ├── setup_pi.sh
+│   └── explore_plc.py
+├── docker-compose.yml            # Dev / Raspberry Pi
+├── docker-compose.edge.yml       # Production → Simatic Edge Panel
 ├── Dockerfile
 └── .env
 ```
@@ -136,6 +163,10 @@ project-s7/
 | `/api/process/data` | GET | 21 tags WinCC Unified |
 | `/api/process/write` | POST | Écrire F1_SP ou F2_SP via Open Pipe |
 | `/api/setpoint` | POST | Modifier consignes température / débit |
+| `/api/cascade/params` | POST | Mettre à jour gains PI+P / mode contrôle |
+| `/api/identification/start` | POST | Lancer step test automatique |
+| `/api/identification/cancel` | POST | Annuler step test en cours |
+| `/api/identification/status` | GET | État et résultats du step test |
 | `/api/export/csv` | GET | Télécharger l'historique CSV |
 | `/api/status` | GET | État connexion PLC + statistiques log |
 | `/health` | GET | Healthcheck Docker |
@@ -151,7 +182,7 @@ project-s7/
 | `Tin1_wymiennik1` | Real | **Entrée flux chaud HE** — var. contrôlée PI+P |
 | `Tout1_wymiennik1` | Real | Sortie flux chaud HE |
 | `Tin2_wymiennik1` | Real | Entrée flux froid HE |
-| `Tout2_wymiennik1` | Real | **Sortie flux froid HE** — boucle cascade (TBD) |
+| `Tout2_wymiennik1` | Real | **Sortie flux froid HE** — consigne boucle cascade |
 | `F1` / `F1_SP` | Real | Débit chaud / consigne — **var. manipulée** |
 | `F2` / `F2_SP` | Real | Débit froid / consigne |
 | `Zawor_F1` / `Zawor_F2` | Word/Int | État vannes |
@@ -165,7 +196,7 @@ project-s7/
 ## Déploiement
 
 <details>
-<summary>🍓 Raspberry Pi (développement)</summary>
+<summary>🍓 Raspberry Pi (développement standalone)</summary>
 
 ```bash
 # Premier déploiement
@@ -177,12 +208,11 @@ docker compose up -d --build
 
 # Mise à jour
 git pull && docker compose down && docker compose up -d --build
-
-# Arrêt propre
-docker compose down && sudo shutdown -h now
 ```
 
 App disponible sur `http://192.168.1.38:5000`
+
+> **Limite :** le socket Open Pipe (`/tmp/siemens/automation`) n'est pas accessible depuis un Pi externe — les écritures via Open Pipe tombent en fallback simulation.
 
 </details>
 
@@ -193,12 +223,14 @@ App disponible sur `http://192.168.1.38:5000`
 2. Charger `docker-compose.edge.yml`
 3. Publier l'app (port `30500`, `mem_limit: 256m`)
 4. Déployer via **Edge Management** → `http://192.168.1.200`
-5. Accéder : `http://192.168.1.200:30500/schema`
+5. Accéder depuis le navigateur du panel : `http://localhost:30500/schema`
 
 **Open Pipe** — volume monté automatiquement :
 ```
 /tmp/siemens/automation → /tempcontainer/
 ```
+
+> **Statut :** déploiement en attente d'acquisition de licence Industrial Edge pour le panel `192.168.1.200`.
 
 </details>
 
@@ -224,11 +256,10 @@ FLASK_DEBUG=1
 | Backend | Python 3.11 · Flask · Flask-SocketIO |
 | PLC | python-snap7 (Snap7 TCP) |
 | Panel | Siemens Open Pipe (Unix socket) |
-| Frontend | Vanilla JS · Chart.js · Socket.IO client |
-| Infra | Docker · Docker Compose · Raspberry Pi |
+| Contrôle | Cascade PI+P · Identification FOPTD · Tuning IMC |
+| Frontend | Vanilla JS · Chart.js · Socket.IO client · Bootstrap 5 |
+| Infra | Docker · Docker Compose |
 | Cible prod | SIMATIC HMI Unified 7" · Industrial Edge |
-
----
 
 ---
 
@@ -257,5 +288,5 @@ curl http://localhost:5000/api/data
 ---
 
 <div align="center">
-<sub>Projet de thèse — Automatisation industrielle · Procédé thermique S7-1500</sub>
+<sub>Projet de thèse — Icam site de Bretagne · Politechnika Śląska · Procédé thermique S7-1500</sub>
 </div>
