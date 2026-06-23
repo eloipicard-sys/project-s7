@@ -12,11 +12,13 @@ DB layout (adapt to your TIA Portal project):
 
 import os
 import logging
+import threading
 
 # Attempt to import snap7 — graceful fallback if not installed
 try:
     import snap7
     from snap7.util import get_real, set_real
+    from snap7.types import Areas
     SNAP7_AVAILABLE = True
 except ImportError:
     SNAP7_AVAILABLE = False
@@ -24,15 +26,21 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# ── DB memory map ────────────────────────────────────────────────────────────
-DB_NUMBER    = int(os.getenv("PLC_DB", 1))
-OFFSET_TEMP  = 0     # DBD0  — measured temperature
-OFFSET_FLOW  = 4     # DBD4  — measured flow rate
-OFFSET_SP_T  = 8     # DBD8  — temperature setpoint
-OFFSET_SP_F  = 12    # DBD12 — flow rate setpoint
-OFFSET_VALVE = 16    # DBW16 — valve state
+# ── DB1 memory map ───────────────────────────────────────────────────────────
+DB_NUMBER = int(os.getenv("PLC_DB", 1))
 
-VALVE_MAP = {0: "CLOSED", 1: "OPEN", 2: "PARTIAL"}
+# Process variables block — 7 × REAL starting at offset 28 (28 bytes total)
+OFFSET_PROCESS = 28
+_PROCESS_VARS  = [
+    (28, "Tin1_HE1"),
+    (32, "Tout1_HE1"),
+    (36, "Tin2_HE1"),
+    (40, "Tout2_HE1"),
+    (44, "F1"),
+    (48, "F2"),
+    (52, "F1_SP"),
+]
+OFFSET_F1_SP = 52
 
 
 class PLCConnector:
@@ -46,6 +54,7 @@ class PLCConnector:
         self.plc_ip   = os.getenv("PLC_IP", "")
         self.plc_rack = int(os.getenv("PLC_RACK", 0))
         self.plc_slot = int(os.getenv("PLC_SLOT", 1))
+        self._lock    = threading.Lock()
 
     # ── Connection management ────────────────────────────────────────────────
 
@@ -120,48 +129,78 @@ class PLCConnector:
         raw = int(value).to_bytes(2, byteorder="big", signed=True)
         self.client.db_write(db, offset, raw)
 
+    # ── Merker area helpers ───────────────────────────────────────────────────
+
+    # All real-valued MD tags: (byte_offset, tag_name)
+    _MERKER_REALS = [
+        (12, "T_hout"),
+        (16, "T_hin"),
+        (20, "power_SP"),
+        (24, "F1_SP"),
+        (28, "F1"),
+        (32, "F2"),
+        (36, "F2_SP"),
+        (40, "Tin2_HE1"),
+        (44, "Tout1_HE1"),
+        (48, "Tin1_HE1"),
+        (52, "Tout2_HE1"),
+        (56, "pressure"),
+    ]
+    _MK_START = 12
+    _MK_END   = 60  # exclusive
+
+    def read_merker_tags(self) -> dict:
+        """
+        Read all REAL-valued MD variables in one Merker area read.
+        Returns dict with same keys as openpipe.read_all_tags() for real-valued tags.
+        Raw ADC / Bool / Word tags are absent (not in Merker REAL area).
+        """
+        if not self.is_connected():
+            raise ConnectionError("PLC not connected")
+        size = self._MK_END - self._MK_START
+        with self._lock:
+            raw = self.client.read_area(Areas.MK, 0, self._MK_START, size)
+        result = {}
+        for offset, name in self._MERKER_REALS:
+            result[name] = round(get_real(raw, offset - self._MK_START), 3)
+        return result
+
+    def write_merker_real(self, byte_offset: int, value: float):
+        """Write a REAL value to a Merker double-word (MD) address."""
+        if not self.is_connected():
+            raise ConnectionError("PLC not connected")
+        data = bytearray(4)
+        set_real(data, 0, float(value))
+        with self._lock:
+            self.client.write_area(Areas.MK, 0, byte_offset, data)
+        logger.info(f"Merker write: MD{byte_offset} = {value}")
+
     # ── Process data API ─────────────────────────────────────────────────────
 
     def read_process_data(self) -> dict:
         """
-        Read all process variables from the PLC in a single db_read call.
-        Returns a dict compatible with get_plc_data() in main.py.
+        Read all 7 process REAL variables from DB1 (offsets 28–55).
+        Returns dict with canonical tag names matching openpipe_connector.
         Raises ConnectionError if PLC is not reachable.
         """
         if not self.is_connected():
             raise ConnectionError("PLC not connected")
 
-        # Single read: 4+4+4+4+2 = 18 bytes (REAL×4 + INT×1)
-        raw = self.client.db_read(DB_NUMBER, OFFSET_TEMP, 18)
+        with self._lock:
+            raw = self.client.db_read(DB_NUMBER, OFFSET_PROCESS, 28)
 
-        temperature = get_real(raw, 0)   # DBD0
-        flow_rate   = get_real(raw, 4)   # DBD4
-        sp_temp     = get_real(raw, 8)   # DBD8
-        sp_flow     = get_real(raw, 12)  # DBD12
-        valve_raw   = int.from_bytes(raw[16:18], byteorder="big", signed=True)  # DBW16
-        valve_state = VALVE_MAP.get(valve_raw, "UNKNOWN")
-
-        return {
-            "temperature":   round(temperature, 2),
-            "flow_rate":     round(flow_rate, 3),
-            "setpoint_temp": round(sp_temp, 2),
-            "setpoint_flow": round(sp_flow, 3),
-            "valve_state":   valve_state,
-        }
-
-    def write_temperature_setpoint(self, value: float):
-        """Write temperature setpoint to PLC DB."""
-        if not self.is_connected():
-            raise ConnectionError("PLC not connected")
-        self._write_real(DB_NUMBER, OFFSET_SP_T, value)
-        logger.info(f"Temperature setpoint written: {value} deg C")
+        result = {}
+        for offset, name in _PROCESS_VARS:
+            result[name] = round(get_real(raw, offset - OFFSET_PROCESS), 3)
+        return result
 
     def write_flow_setpoint(self, value: float):
-        """Write flow rate setpoint to PLC DB."""
+        """Write F1_SP to DB1 at offset 52."""
         if not self.is_connected():
             raise ConnectionError("PLC not connected")
-        self._write_real(DB_NUMBER, OFFSET_SP_F, value)
-        logger.info(f"Flow setpoint written: {value} m3/h")
+        with self._lock:
+            self._write_real(DB_NUMBER, OFFSET_F1_SP, value)
+        logger.info(f"F1_SP written: {value} m3/h → DB{DB_NUMBER}.DBD{OFFSET_F1_SP}")
 
     # ── Test variables API ────────────────────────────────────────────────────
     # DB layout:

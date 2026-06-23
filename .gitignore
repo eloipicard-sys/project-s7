@@ -14,3 +14,7 @@ edge/
 project-s7-app.tar
 latex.zip
 latex/
+
+# Thesis analysis — local only
+mesures/
+.vscode/

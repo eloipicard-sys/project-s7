@@ -51,6 +51,8 @@ TAG_TYPES = {
     "Valve_F2":                   "Int",
     # Power
     "power":                      "Bool",
+    # Heater PWM command (0–100 %) — tag name to confirm with Michal
+    "HeaterLarge_PWM":            "Real",
 }
 
 TAGS = list(TAG_TYPES.keys())
@@ -59,12 +61,18 @@ TAGS = list(TAG_TYPES.keys())
 class OpenPipeConnector:
     """
     Communicates with WinCC Unified via Open Pipe Unix socket.
-    Falls back to simulation when socket is unavailable (dev on Pi).
+    Falls back to Snap7 Merker reads when socket is unavailable (dev PC / Pi).
+    Falls back to simulation when neither Open Pipe nor Snap7 is available.
     """
 
     def __init__(self):
-        self._sock_path = os.path.join(SOCKET_DIR, SOCKET_FILE)
-        self._available = self._check_availability()
+        self._sock_path  = os.path.join(SOCKET_DIR, SOCKET_FILE)
+        self._available  = self._check_availability()
+        self._plc        = None  # set via set_snap7_fallback()
+
+    def set_snap7_fallback(self, plc_connector) -> None:
+        """Register a PLCConnector to use as fallback when Open Pipe is unavailable."""
+        self._plc = plc_connector
 
     def _check_availability(self) -> bool:
         available = os.path.exists(self._sock_path)
@@ -83,37 +91,39 @@ class OpenPipeConnector:
 
     def read_all_tags(self) -> dict:
         """
-        Read all 21 WinCC Unified tags.
-        Returns {tag_name: value, ...} + 'source' key.
+        Read all WinCC Unified tags.
+        Priority: Open Pipe socket → Snap7 Merker → simulation.
         """
-        if not self._available:
-            data = self._simulated_values()
-            data["source"] = "SIMULATION"
-            return data
-        try:
-            data = self._read_via_socket(TAGS)
-            data["source"] = "OPENPIPE"
-            return data
-        except Exception as exc:
-            logger.error(f"Open Pipe read failed: {exc}")
-            data = self._simulated_values()
-            data["source"] = "SIMULATION"
-            return data
+        if self._available:
+            try:
+                data = self._read_via_socket(TAGS)
+                data["source"] = "OPENPIPE"
+                return data
+            except Exception as exc:
+                logger.error(f"Open Pipe read failed: {exc}")
+
+        data = self._simulated_values()
+        data["source"] = "SIMULATION"
+        return data
 
     def write_tag(self, tag_name: str, value) -> bool:
-        """Write a single tag value via Open Pipe."""
+        """
+        Write a single tag value.
+        Priority: Open Pipe socket → Snap7 Merker (F1_SP/F2_SP only) → no-op.
+        """
         if tag_name not in TAG_TYPES:
             raise ValueError(f"Unknown tag: {tag_name}")
-        if not self._available:
-            logger.warning(f"Open Pipe not available — write {tag_name}={value} ignored")
-            return False
-        try:
-            self._write_via_socket(tag_name, value)
-            logger.info(f"Open Pipe write: {tag_name} = {value}")
-            return True
-        except Exception as exc:
-            logger.error(f"Open Pipe write {tag_name} failed: {exc}")
-            return False
+
+        if self._available:
+            try:
+                self._write_via_socket(tag_name, value)
+                logger.info(f"Open Pipe write: {tag_name} = {value}")
+                return True
+            except Exception as exc:
+                logger.error(f"Open Pipe write {tag_name} failed: {exc}")
+
+        logger.warning(f"write_tag {tag_name}={value} — no transport available")
+        return False
 
     # ── Socket I/O ─────────────────────────────────────────────────────────────
 
@@ -176,4 +186,5 @@ class OpenPipeConnector:
             "F2_skal":                    int(f2 * 100),
             "Valve_F2":                   2,
             "power":                      True,
+            "HeaterLarge_PWM":            50.0,
         }

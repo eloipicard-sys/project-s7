@@ -38,6 +38,7 @@ init_logger()
 
 # Attempt PLC connection at startup (non-blocking)
 plc.connect()
+openpipe.set_snap7_fallback(plc)
 
 # In-memory setpoints (used by simulation; overridden by PLC values when connected)
 process_setpoints = {
@@ -97,13 +98,10 @@ def _plc_poll_loop():
             d.update({"timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                       "plc_ip": plc.plc_ip,
                       "source": "PLC"})
-            with _setpoints_lock:
-                process_setpoints["temperature"] = d["setpoint_temp"]
-                process_setpoints["flow_rate"]   = d["setpoint_flow"]
             log_sample(d)
             with _sim_lock:
                 _last_sim = d
-            socketio.emit('process_data', d)
+            socketio.emit('process_tags', d)
         except Exception as exc:
             logging.warning(f"PLC broadcast failed: {exc}")
 
@@ -118,20 +116,21 @@ def _openpipe_poll_loop():
             data = openpipe.read_all_tags()
             data["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
 
-            Tin1  = data.get('Tin1_HE1', 0.0)
-            Tout2 = data.get('Tout2_HE1', 0.0)
-            F1_SP = data.get('F1_SP', 0.0)
+            Tin1       = data.get('Tin1_HE1', 0.0)
+            Tout2      = data.get('Tout2_HE1', 0.0)
+            F1         = data.get('F1', 2.0)          # measured flow (L/min)
+            PWM_current = data.get('HeaterLarge_PWM', 50.0)
 
             # Identification takes priority over cascade auto-control
-            ident_write = step_ident.feed(Tin1, Tout2, F1_SP)
+            ident_write = step_ident.feed(Tin1, Tout2, PWM_current)
             if ident_write is not None:
-                openpipe.write_tag('F1_SP', ident_write)
+                openpipe.write_tag('HeaterLarge_PWM', ident_write)
             elif cascade_ctrl.mode != CascadeController.MODE_MANUAL:
-                F1_new = cascade_ctrl.update(Tin1, Tout2)
-                if F1_new is not None:
-                    openpipe.write_tag('F1_SP', F1_new)
+                pwm_new = cascade_ctrl.update(Tin1, Tout2, F1)
+                if pwm_new is not None:
+                    openpipe.write_tag('HeaterLarge_PWM', pwm_new)
             else:
-                cascade_ctrl.update(Tin1, Tout2)
+                cascade_ctrl.update(Tin1, Tout2, F1)
 
             socketio.emit('process_tags', data)
 
@@ -296,8 +295,8 @@ def process_write():
     data = request.get_json(force=True)
     tag   = data.get("tag", "")
     value = data.get("value")
-    if tag not in ("F1_SP", "F2_SP"):
-        return jsonify({"ok": False, "error": "Only F1_SP and F2_SP are writable"}), 400
+    if tag not in ("F1_SP", "F2_SP", "HeaterLarge_PWM"):
+        return jsonify({"ok": False, "error": "Only F1_SP, F2_SP and HeaterLarge_PWM are writable"}), 400
     try:
         ok = openpipe.write_tag(tag, float(value))
         return jsonify({"ok": ok, "tag": tag, "value": value})
@@ -386,11 +385,11 @@ def cascade_status():
 def cascade_mode():
     data  = request.get_json(force=True)
     mode  = data.get("mode", "")
-    tags  = openpipe.read_all_tags()
-    F1_SP = tags.get("F1_SP", 0.0)
-    Tin1  = tags.get("Tin1_wymiennik1", 0.0)
+    tags        = openpipe.read_all_tags()
+    current_PWM = tags.get("HeaterLarge_PWM", 50.0)
+    Tin1        = tags.get("Tin1_HE1", 0.0)
     try:
-        cascade_ctrl.set_mode(mode, current_F1_SP=F1_SP, current_Tin1=Tin1)
+        cascade_ctrl.set_mode(mode, current_PWM=current_PWM, current_Tin1=Tin1)
         return jsonify({"ok": True, "mode": mode})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
