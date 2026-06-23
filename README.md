@@ -20,13 +20,13 @@ Projet de thèse — déployé sur SIMATIC HMI Unified Comfort Panel 7" via Indu
 ```mermaid
 flowchart LR
     THIN(["🌡 T_hin"]):::temp
-    FOUR["🔥 FOUR\npower ON/OFF"]:::heater
-    THOUT(["🌡 T_hout\n= Tin1"]):::temp
+    FOUR["🔥 FOUR\nPWM 0–100 %"]:::heater
+    THOUT(["🌡 T_in1_HE1\n← contrôlée PI"]):::temp
     HE["♨️ ÉCHANGEUR\nHE-001"]:::he
-    TOUT1(["🌡 Tout1"]):::temp
+    TOUT1(["🌡 Tout1_HE1"]):::temp
 
-    TCOLD_IN(["🌡 Tin2\n← froid entrant"]):::cold
-    TOUT2(["🌡 Tout2\n← froid sortant"]):::cold
+    TCOLD_IN(["🌡 Tin2_HE1\n← froid entrant"]):::cold
+    TOUT2(["🌡 Tout2_HE1\n← consigne cascade"]):::cold
 
     F1(["⟶ F1\ndébit chaud"]):::flow
     F2(["⟵ F2\ndébit froid"]):::flow
@@ -47,7 +47,7 @@ flowchart LR
 ```
 
 Le four chauffe le flux F1 → le flux chaud cède sa chaleur au flux froid dans l'échangeur (contre-courant).  
-**Régulation :** PI+P sur Tin1 (variable manipulée : F1) · Cascade Tout2 (boucle externe)
+**Régulation :** PI+P sur Tin1\_HE1 (variable manipulée : **PWM heater**) · Cascade Tout2\_HE1 (boucle externe) · **Gain scheduling sur F1**
 
 ---
 
@@ -78,7 +78,7 @@ open http://localhost:5000/schema
 | [`/schema`](http://localhost:5000/schema) | **Synoptique** — schéma P&ID plein écran, valeurs live, consignes tactiles |
 | [`/cascade`](http://localhost:5000/cascade) | **Cascade** — identification FOPTD, tuning IMC, contrôle cascade (outil ingénieur) |
 | [`/`](http://localhost:5000) | **Monitor** — graphiques temps réel, alarmes multi-niveaux, export CSV |
-| [`/process`](http://localhost:5000/process) | **Process** — 21 tags WinCC Unified (Four · Éch.1 · Éch.2) |
+| [`/process`](http://localhost:5000/process) | **Process** — tags WinCC Unified (Four · Éch.1 · Éch.2) |
 | [`/test`](http://localhost:5000/test) | **Test DB** — lecture/écriture variables PLC brutes |
 
 ---
@@ -87,7 +87,7 @@ open http://localhost:5000/schema
 
 ```mermaid
 graph TD
-    PLC[S7-1500 PLC<br/>192.168.1.100] -->|Snap7 TCP| PC[plc_connector.py]
+    PLC[S7-1500 PLC<br/>192.168.1.100] -->|Snap7 TCP| PC[plc_connector.py<br/>DB1 + Merker]
     WinCC[WinCC Unified<br/>Internal Tags] -->|Open Pipe<br/>Unix socket| OP[openpipe_connector.py]
     SIM[thermal_model.py<br/>Simulation] -.->|fallback| MAIN
 
@@ -95,9 +95,9 @@ graph TD
     OP --> MAIN
     SIM --> MAIN
 
-    MAIN -->|cascade_data| CC[cascade_controller.py<br/>PI+P boucle interne]
+    MAIN -->|cascade_data| CC[cascade_controller.py<br/>PI+P → PWM · gain scheduling F1]
     MAIN -->|ident_update| ID[identification.py<br/>Step test + IMC]
-    CC --> MAIN
+    CC -->|HeaterLarge_PWM| MAIN
     ID --> MAIN
 
     MAIN -->|process_data| UI1[Monitor /]
@@ -118,34 +118,20 @@ graph TD
 project-s7/
 ├── app/
 │   ├── main.py                   # Flask + Socket.IO + threads background
-│   ├── plc_connector.py          # Interface Snap7 → S7-1500 (TCP)
-│   ├── openpipe_connector.py     # Interface Open Pipe → WinCC Unified (21 tags)
-│   ├── cascade_controller.py     # Contrôleur PI+P boucle interne/externe
+│   ├── plc_connector.py          # Interface Snap7 → S7-1500 (DB1 + Merker)
+│   ├── openpipe_connector.py     # Interface Open Pipe → WinCC Unified
+│   ├── cascade_controller.py     # Contrôleur PI+P → PWM, gain scheduling, bumpless
 │   ├── identification.py         # Step test automatisé + identification FOPTD
 │   ├── thermal_model.py          # Simulation fallback (1er ordre, bruit gaussien)
 │   ├── logger.py                 # CSV append-only logger
 │   └── templates/
 │       ├── schema.html           # Synoptique P&ID (page principale panel)
 │       ├── cascade.html          # Identification + contrôle cascade (ingénieur)
-│       ├── index.html            # Monitor (charts, PID, alarmes)
-│       ├── process.html          # 21 tags WinCC
+│       ├── index.html            # Monitor (charts, alarmes)
+│       ├── process.html          # Tags WinCC
 │       └── test.html             # Test DB PLC
 ├── docs/                         # Documentation
-│   ├── ARCHITECTURE.md
-│   ├── DEPLOYMENT_OPTIONS.md
-│   ├── IMPROVEMENTS.md
-│   ├── LAB_DEPLOY_CHECKLIST.md
-│   └── LANCER_LE_TEST.md
-├── latex/                        # Sources rapport de thèse (LaTeX)
-│   ├── main.tex
-│   ├── chapters/
-│   ├── figures/
-│   └── references.bib
-├── scripts/                      # Scripts déploiement
-│   ├── deploy_to_pi.sh
-│   ├── deploy_fast.sh
-│   ├── setup_pi.sh
-│   └── explore_plc.py
+├── scripts/                      # Scripts déploiement Pi / Edge
 ├── docker-compose.yml            # Dev / Raspberry Pi
 ├── docker-compose.edge.yml       # Production → Simatic Edge Panel
 ├── Dockerfile
@@ -160,36 +146,61 @@ project-s7/
 | Endpoint | Méthode | Description |
 |----------|---------|-------------|
 | `/api/data` | GET | Snapshot procédé (Snap7 / simulation) |
-| `/api/process/data` | GET | 21 tags WinCC Unified |
-| `/api/process/write` | POST | Écrire F1_SP ou F2_SP via Open Pipe |
+| `/api/process/data` | GET | Tags WinCC Unified |
+| `/api/process/write` | POST | Écrire `F1_SP`, `F2_SP` ou `HeaterLarge_PWM` via Open Pipe |
 | `/api/setpoint` | POST | Modifier consignes température / débit |
-| `/api/cascade/params` | POST | Mettre à jour gains PI+P / mode contrôle |
+| `/api/cascade/status` | GET | État contrôleur cascade (mode, PWM, gains, F1) |
+| `/api/cascade/mode` | POST | Basculer MANUAL / AUTO-INNER / AUTO-FULL |
+| `/api/cascade/setpoint` | POST | Modifier Tout2\_SP ou Tin1\_SP |
+| `/api/cascade/params` | POST | Mettre à jour gains PI+P (désactive le gain scheduling) |
 | `/api/identification/start` | POST | Lancer step test automatique |
 | `/api/identification/cancel` | POST | Annuler step test en cours |
 | `/api/identification/status` | GET | État et résultats du step test |
 | `/api/export/csv` | GET | Télécharger l'historique CSV |
-| `/api/status` | GET | État connexion PLC + statistiques log |
 | `/health` | GET | Healthcheck Docker |
 
 </details>
 
 <details>
-<summary>🏷️ Tags WinCC Unified (21 variables)</summary>
+<summary>🏷️ Tags WinCC Unified</summary>
 
 | Tag | Type | Rôle |
 |-----|------|------|
 | `T_hin` / `T_hout` | Real | Températures entrée/sortie four |
-| `Tin1_wymiennik1` | Real | **Entrée flux chaud HE** — var. contrôlée PI+P |
-| `Tout1_wymiennik1` | Real | Sortie flux chaud HE |
-| `Tin2_wymiennik1` | Real | Entrée flux froid HE |
-| `Tout2_wymiennik1` | Real | **Sortie flux froid HE** — consigne boucle cascade |
-| `F1` / `F1_SP` | Real | Débit chaud / consigne — **var. manipulée** |
+| `Tin1_HE1` | Real | **Entrée flux chaud HE** — var. contrôlée boucle interne PI |
+| `Tout1_HE1` | Real | Sortie flux chaud HE |
+| `Tin2_HE1` | Real | Entrée flux froid HE |
+| `Tout2_HE1` | Real | **Sortie flux froid HE** — consigne boucle externe cascade |
+| `F1` / `F1_SP` | Real | Débit chaud mesuré (L/min) / consigne |
 | `F2` / `F2_SP` | Real | Débit froid / consigne |
-| `Zawor_F1` / `Zawor_F2` | Word/Int | État vannes |
+| `HeaterLarge_PWM` | Real | **Commande PWM heater (0–100 %)** — sortie du contrôleur |
+| `Valve_F1` / `Valve_F2` | Int | État vannes (0=CLOSED, 1=OPEN, 2=PARTIAL) |
 | `power` | Bool | Alimentation four |
 | `*_skal` | Int | Valeurs brutes analogiques (lecture seule) |
 
 </details>
+
+---
+
+## Contrôleur cascade
+
+Le contrôleur implémente un schéma PI+P en forme véloce (incrémentale) :
+
+```
+Boucle interne  :  Tin1_HE1  →  PI  →  PWM heater (0–100 %)
+Boucle externe  :  Tout2_HE1 →  P   →  Tin1_SP
+```
+
+**Gain scheduling** : les gains PI sont recalculés à chaque cycle selon le débit F1 mesuré, via un ajustement en loi puissance identifié expérimentalement (essais du 23/06/2026) :
+
+| F1 (L/min) | K (°C/%) | τ (s) | θ (s) | K\_PI (Normal) |
+|:---:|:---:|:---:|:---:|:---:|
+| 1 | 1.622 | 116.3 | 25.7 | 0.505 |
+| 2 | 0.756 |  56.0 | 18.1 | 1.000 |
+| 3 | 0.515 |  44.3 | 15.0 | 1.451 |
+| 4 | 0.368 |  37.9 |  4.4 | 2.438 |
+
+Réglage IMC Normal (λ = τ). Trois niveaux disponibles : Aggressive (λ = 0.5τ) · Normal · Conservative (λ = 2τ).
 
 ---
 
@@ -200,7 +211,7 @@ project-s7/
 
 ```bash
 # Premier déploiement
-ssh pi@raspberry.local
+ssh pi@192.168.1.38
 git clone https://github.com/eloipicard-sys/project-s7.git
 cd project-s7
 nano .env          # PLC_IP=192.168.1.100
@@ -212,7 +223,7 @@ git pull && docker compose down && docker compose up -d --build
 
 App disponible sur `http://192.168.1.38:5000`
 
-> **Limite :** le socket Open Pipe (`/tmp/siemens/automation`) n'est pas accessible depuis un Pi externe — les écritures via Open Pipe tombent en fallback simulation.
+> **Limite :** le socket Open Pipe (`/tmp/siemens/automation`) n'est pas accessible depuis un Pi externe — les écritures tombent en fallback simulation.
 
 </details>
 
@@ -254,9 +265,9 @@ FLASK_DEBUG=1
 | Couche | Technologie |
 |--------|------------|
 | Backend | Python 3.11 · Flask · Flask-SocketIO |
-| PLC | python-snap7 (Snap7 TCP) |
+| PLC | python-snap7 (Snap7 TCP · DB1 + Merker) |
 | Panel | Siemens Open Pipe (Unix socket) |
-| Contrôle | Cascade PI+P · Identification FOPTD · Tuning IMC |
+| Contrôle | Cascade PI+P · PWM · Gain scheduling · Identification FOPTD · Tuning IMC |
 | Frontend | Vanilla JS · Chart.js · Socket.IO client · Bootstrap 5 |
 | Infra | Docker · Docker Compose |
 | Cible prod | SIMATIC HMI Unified 7" · Industrial Edge |
@@ -274,7 +285,7 @@ PLC_IP=192.168.1.100 FLASK_DEBUG=1 python main.py
 Vérifier que l'app tourne :
 ```bash
 curl http://localhost:5000/health
-curl http://localhost:5000/api/data
+curl http://localhost:5000/api/cascade/status
 ```
 
 ---
@@ -283,7 +294,7 @@ curl http://localhost:5000/api/data
 
 - Activer **PUT/GET access** : CPU Properties → Protection & Security → Permit access with PUT/GET
 - DB1 avec **Optimized block access désactivé**
-- Vérifier que les offsets DB correspondent à `plc_connector.py`
+- Tag `HeaterLarge_PWM` accessible via Open Pipe (nom à confirmer dans WinCC Unified)
 
 ---
 
