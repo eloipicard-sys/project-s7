@@ -9,7 +9,7 @@ services:
     ports:
       - "5000:5000"          # Accès web : http://localhost:5000
     environment:
-      - PLC_IP=${PLC_IP:-192.168.0.1}      # IP du S7-1500 (depuis .env)
+      - PLC_IP=${PLC_IP:-192.168.1.10}     # IP du S7-1500 (depuis .env)
       - PLC_RACK=${PLC_RACK:-0}
       - PLC_SLOT=${PLC_SLOT:-1}
       - FLASK_DEBUG=${FLASK_DEBUG:-1}
