@@ -116,13 +116,14 @@ def _openpipe_poll_loop():
             data = openpipe.read_all_tags()
             data["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
 
-            Tin1       = data.get('Tin1_HE1', 0.0)
-            Tout2      = data.get('Tout2_HE1', 0.0)
-            F1         = data.get('F1', 2.0)          # measured flow (L/min)
+            Tin1        = data.get('Tin1_HE1', 0.0)
+            Tout2       = data.get('Tout2_HE1', 0.0)
+            T_hout      = data.get('T_hout', 0.0)     # small-furnace outlet (smallOutlet)
+            F1          = data.get('F1', 2.0)          # measured flow (L/min)
             PWM_current = data.get('HeaterLarge_PWM', 50.0)
 
             # Identification takes priority over cascade auto-control
-            ident_write = step_ident.feed(Tin1, Tout2, PWM_current)
+            ident_write = step_ident.feed(Tin1, Tout2, PWM_current, T_hout)
             if ident_write is not None:
                 openpipe.write_tag('HeaterLarge_PWM', ident_write)
             elif cascade_ctrl.mode != CascadeController.MODE_MANUAL:
@@ -444,6 +445,29 @@ def ident_status_route():
 @app.route("/api/identification/data")
 def ident_data_route():
     return jsonify({"data": step_ident.get_chart_data()})
+
+
+@app.route("/api/identification/push_params", methods=["POST"])
+def ident_push_params():
+    """Write identified krPI and TiPI to PLC DB (DBD56, DBD60) and update cascade gains."""
+    st     = step_ident.get_status()
+    result = st.get('result', {})
+    krPI   = result.get('krPI')
+    TiPI   = result.get('TiPI')
+    if krPI is None or TiPI is None:
+        return jsonify({"ok": False,
+                        "error": "No krPI/TiPI available — run identification first"}), 400
+    # Always update the in-memory cascade controller
+    cascade_ctrl.set_inner_params(krPI, TiPI)
+    if not plc.is_connected():
+        return jsonify({"ok": True, "krPI": krPI, "TiPI": TiPI,
+                        "plc_written": False, "note": "PLC not connected — cascade updated only"})
+    try:
+        plc.write_pi_params(krPI, TiPI)
+        return jsonify({"ok": True, "krPI": krPI, "TiPI": TiPI, "plc_written": True})
+    except Exception as exc:
+        logging.error(f"PI params PLC write failed: {exc}")
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 if __name__ == "__main__":

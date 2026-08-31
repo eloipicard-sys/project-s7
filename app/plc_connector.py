@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 # ── DB1 memory map ───────────────────────────────────────────────────────────
 DB_NUMBER = int(os.getenv("PLC_DB", 1))
 
-# Process variables block — 7 × REAL starting at offset 28 (28 bytes total)
+# Process variables block — 9 × REAL starting at offset 28 (36 bytes total)
+# DB1.DBD56 = krPI (Kp of inner PI, written by Docker after identification)
+# DB1.DBD60 = TiPI (Ti of inner PI, written by Docker after identification)
 OFFSET_PROCESS = 28
 _PROCESS_VARS  = [
     (28, "Tin1_HE1"),
@@ -39,8 +41,12 @@ _PROCESS_VARS  = [
     (44, "F1"),
     (48, "F2"),
     (52, "F1_SP"),
+    (56, "krPI"),
+    (60, "TiPI"),
 ]
 OFFSET_F1_SP = 52
+OFFSET_krPI  = 56
+OFFSET_TiPI  = 60
 
 
 class PLCConnector:
@@ -187,7 +193,7 @@ class PLCConnector:
             raise ConnectionError("PLC not connected")
 
         with self._lock:
-            raw = self.client.db_read(DB_NUMBER, OFFSET_PROCESS, 28)
+            raw = self.client.db_read(DB_NUMBER, OFFSET_PROCESS, 36)
 
         result = {}
         for offset, name in _PROCESS_VARS:
@@ -201,6 +207,16 @@ class PLCConnector:
         with self._lock:
             self._write_real(DB_NUMBER, OFFSET_F1_SP, value)
         logger.info(f"F1_SP written: {value} m3/h → DB{DB_NUMBER}.DBD{OFFSET_F1_SP}")
+
+    def write_pi_params(self, krPI: float, TiPI: float):
+        """Write identified PI parameters to DB1 (DBD56=krPI, DBD60=TiPI)."""
+        if not self.is_connected():
+            raise ConnectionError("PLC not connected")
+        with self._lock:
+            self._write_real(DB_NUMBER, OFFSET_krPI, krPI)
+            self._write_real(DB_NUMBER, OFFSET_TiPI, TiPI)
+        logger.info(f"PI params written: krPI={krPI} → DB{DB_NUMBER}.DBD{OFFSET_krPI}, "
+                    f"TiPI={TiPI} → DB{DB_NUMBER}.DBD{OFFSET_TiPI}")
 
     # ── Test variables API ────────────────────────────────────────────────────
     # DB layout:
