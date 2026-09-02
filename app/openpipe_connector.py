@@ -18,6 +18,8 @@ import json
 import logging
 import time
 
+from process_sim import ProcessSimulator
+
 logger = logging.getLogger(__name__)
 
 SOCKET_DIR  = os.getenv("OPENPIPE_SOCKET_DIR", "/tempcontainer")
@@ -69,6 +71,7 @@ class OpenPipeConnector:
         self._sock_path  = os.path.join(SOCKET_DIR, SOCKET_FILE)
         self._available  = self._check_availability()
         self._plc        = None  # set via set_snap7_fallback()
+        self._sim        = ProcessSimulator()
 
     def set_snap7_fallback(self, plc_connector) -> None:
         """Register a PLCConnector to use as fallback when Open Pipe is unavailable."""
@@ -122,8 +125,19 @@ class OpenPipeConnector:
             except Exception as exc:
                 logger.error(f"Open Pipe write {tag_name} failed: {exc}")
 
-        logger.warning(f"write_tag {tag_name}={value} — no transport available")
-        return False
+        # Aucun transport : la valeur est appliquée au modèle de simulation, pour
+        # que l'interface réagisse aux commandes comme elle le ferait sur le banc.
+        if tag_name == "HeaterLarge_PWM":
+            self._sim.set_pwm(value)
+        elif tag_name == "F1_SP":
+            self._sim.set_flows(f1=value)
+        elif tag_name == "F2_SP":
+            self._sim.set_flows(f2=value)
+        else:
+            logger.warning(f"write_tag {tag_name}={value} — no transport available")
+            return False
+        logger.info(f"simulation: {tag_name} = {value}")
+        return True
 
     # ── Socket I/O ─────────────────────────────────────────────────────────────
 
@@ -159,32 +173,37 @@ class OpenPipeConnector:
     # ── Simulation fallback ────────────────────────────────────────────────────
 
     def _simulated_values(self) -> dict:
-        """Return plausible simulated values for the 21 process tags."""
-        t = time.time()
-        base_t = 80.0 + 20.0 * abs((t % 60) / 30.0 - 1.0)
-        f1 = round(2.5 + 0.5 * abs((t % 30) / 15.0 - 1.0), 2)
-        f2 = round(1.8 + 0.3 * abs((t % 20) / 10.0 - 1.0), 2)
+        """
+        Valeurs simulées des 21 variables, issues du modèle dynamique.
+
+        Le modèle reproduit la structure identifiée expérimentalement : la
+        commande PWM agit sur Tin1 avec le retard et la constante de temps
+        mesurés, et Tout2 suit Tin1 avec sa propre dynamique, plus lente.
+        """
+        s = self._sim.step()
+
+        f1, f2 = s["F1"], s["F2"]
         return {
-            "T_hin":                      round(base_t - 10.0, 1),
-            "T_hout":                     round(base_t + 15.0, 1),
-            "T_we_rock_furnace":          int((base_t - 10.0) * 10),
-            "T_wy_Oven_scale":            int((base_t + 15.0) * 10),
-            "Tin1_HE1":                   round(base_t - 5.0, 1),
-            "Tout1_HE1":                  round(base_t + 8.0, 1),
-            "Tin2_HE1":                   round(base_t - 3.0, 1),
-            "Tout2_HE1":                  round(base_t + 6.0, 1),
-            "Tin1_heat_exchanger1_scale": int((base_t - 5.0) * 10),
-            "Tout1_HE1_raw":              int((base_t + 8.0) * 10),
-            "Tin2_HE1_raw":               int((base_t - 3.0) * 10),
-            "Tout2_HE1_raw":              int((base_t + 6.0) * 10),
+            "T_hin":                      s["T_hin"],
+            "T_hout":                     s["T_hout"],
+            "T_we_rock_furnace":          int(s["T_hin"] * 10),
+            "T_wy_Oven_scale":            int(s["T_hout"] * 10),
+            "Tin1_HE1":                   s["Tin1"],
+            "Tout1_HE1":                  s["Tout1"],
+            "Tin2_HE1":                   s["Tin2"],
+            "Tout2_HE1":                  s["Tout2"],
+            "Tin1_heat_exchanger1_scale": int(s["Tin1"] * 10),
+            "Tout1_HE1_raw":              int(s["Tout1"] * 10),
+            "Tin2_HE1_raw":               int(s["Tin2"] * 10),
+            "Tout2_HE1_raw":              int(s["Tout2"] * 10),
             "F1":                         f1,
-            "F1_SP":                      3.0,
+            "F1_SP":                      f1,
             "F1_skal":                    int(f1 * 100),
             "Valve_F1":                   1,
             "F2":                         f2,
-            "F2_SP":                      2.0,
+            "F2_SP":                      f2,
             "F2_skal":                    int(f2 * 100),
             "Valve_F2":                   2,
             "power":                      True,
-            "HeaterLarge_PWM":            50.0,
+            "HeaterLarge_PWM":            s["PWM"],
         }
