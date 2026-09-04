@@ -116,20 +116,20 @@ def _openpipe_poll_loop():
             data = openpipe.read_all_tags()
             data["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
 
-            Tin1        = data.get('Tin1_HE1', 0.0)
-            Tout2       = data.get('Tout2_HE1', 0.0)
+            Tin1        = data.get('Tin1_PHE1', 0.0)
+            Tout2       = data.get('Tout2_PHE1', 0.0)
             T_hout      = data.get('T_hout', 0.0)     # small-furnace outlet (smallOutlet)
             F1          = data.get('F1', 2.0)          # measured flow (L/min)
-            PWM_current = data.get('HeaterLarge_PWM', 50.0)
+            PWM_current = data.get('power_SP', 50.0)
 
             # Identification takes priority over cascade auto-control
             ident_write = step_ident.feed(Tin1, Tout2, PWM_current, T_hout)
             if ident_write is not None:
-                openpipe.write_tag('HeaterLarge_PWM', ident_write)
+                openpipe.write_tag('power_SP', ident_write)
             elif cascade_ctrl.mode != CascadeController.MODE_MANUAL:
                 pwm_new = cascade_ctrl.update(Tin1, Tout2, F1)
                 if pwm_new is not None:
-                    openpipe.write_tag('HeaterLarge_PWM', pwm_new)
+                    openpipe.write_tag('power_SP', pwm_new)
             else:
                 cascade_ctrl.update(Tin1, Tout2, F1)
 
@@ -296,8 +296,8 @@ def process_write():
     data = request.get_json(force=True)
     tag   = data.get("tag", "")
     value = data.get("value")
-    if tag not in ("F1_SP", "F2_SP", "HeaterLarge_PWM"):
-        return jsonify({"ok": False, "error": "Only F1_SP, F2_SP and HeaterLarge_PWM are writable"}), 400
+    if tag not in ("F1_SP", "F2_SP", "power_SP"):
+        return jsonify({"ok": False, "error": "Only F1_SP, F2_SP and power_SP are writable"}), 400
     try:
         ok = openpipe.write_tag(tag, float(value))
         return jsonify({"ok": ok, "tag": tag, "value": value})
@@ -387,8 +387,8 @@ def cascade_mode():
     data  = request.get_json(force=True)
     mode  = data.get("mode", "")
     tags        = openpipe.read_all_tags()
-    current_PWM = tags.get("HeaterLarge_PWM", 50.0)
-    Tin1        = tags.get("Tin1_HE1", 0.0)
+    current_PWM = tags.get("power_SP", 50.0)
+    Tin1        = tags.get("Tin1_PHE1", 0.0)
     try:
         cascade_ctrl.set_mode(mode, current_PWM=current_PWM, current_Tin1=Tin1)
         return jsonify({"ok": True, "mode": mode})

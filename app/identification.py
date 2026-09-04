@@ -3,9 +3,9 @@ Step-response identification for the thermal process.
 
 Procedure:
   1. Record ~15 s of baseline (5 samples at 3 s/sample)
-  2. Apply step on HeaterLarge_PWM
+  2. Apply step on power_SP
   3. Record response for `duration_s` seconds
-  4. Identify K, tau, theta using 63.2% method for Tin1_HE1 and T_hout (smallOutlet)
+  4. Identify K, tau, theta using 63.2% method for Tin1_PHE1 and T_hout (smallOutlet)
   5. Compute IMC-tuned PI gains (krPI, TiPI) from Tin1 channel at 3 aggressiveness levels
 """
 import time

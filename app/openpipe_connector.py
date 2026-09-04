@@ -32,15 +32,15 @@ TAG_TYPES = {
     "T_hout":                     "Real",
     "T_we_rock_furnace":          "Int",
     "T_wy_Oven_scale":            "Int",
-    # Heat exchanger HE1
-    "Tin1_HE1":                   "Real",
-    "Tout1_HE1":                  "Real",
-    "Tin2_HE1":                   "Real",
-    "Tout2_HE1":                  "Real",
+    # Heat exchanger PHE1
+    "Tin1_PHE1":                   "Real",
+    "Tout1_PHE1":                  "Real",
+    "Tin2_PHE1":                   "Real",
+    "Tout2_PHE1":                  "Real",
     "Tin1_heat_exchanger1_scale": "Int",
-    "Tout1_HE1_raw":              "Int",
-    "Tin2_HE1_raw":               "Int",
-    "Tout2_HE1_raw":              "Int",
+    "Tout1_PHE1_raw":              "Int",
+    "Tin2_PHE1_raw":               "Int",
+    "Tout2_PHE1_raw":              "Int",
     # Flow circuit 1
     "F1":                         "Real",
     "F1_SP":                      "Real",
@@ -54,7 +54,7 @@ TAG_TYPES = {
     # Power
     "power":                      "Bool",
     # Heater PWM command (0–100 %) — tag name to confirm with Michal
-    "HeaterLarge_PWM":            "Real",
+    "power_SP":            "Real",
 }
 
 TAGS = list(TAG_TYPES.keys())
@@ -127,7 +127,7 @@ class OpenPipeConnector:
 
         # Aucun transport : la valeur est appliquée au modèle de simulation, pour
         # que l'interface réagisse aux commandes comme elle le ferait sur le banc.
-        if tag_name == "HeaterLarge_PWM":
+        if tag_name == "power_SP":
             self._sim.set_pwm(value)
         elif tag_name == "F1_SP":
             self._sim.set_flows(f1=value)
@@ -188,14 +188,14 @@ class OpenPipeConnector:
             "T_hout":                     s["T_hout"],
             "T_we_rock_furnace":          int(s["T_hin"] * 10),
             "T_wy_Oven_scale":            int(s["T_hout"] * 10),
-            "Tin1_HE1":                   s["Tin1"],
-            "Tout1_HE1":                  s["Tout1"],
-            "Tin2_HE1":                   s["Tin2"],
-            "Tout2_HE1":                  s["Tout2"],
+            "Tin1_PHE1":                   s["Tin1"],
+            "Tout1_PHE1":                  s["Tout1"],
+            "Tin2_PHE1":                   s["Tin2"],
+            "Tout2_PHE1":                  s["Tout2"],
             "Tin1_heat_exchanger1_scale": int(s["Tin1"] * 10),
-            "Tout1_HE1_raw":              int(s["Tout1"] * 10),
-            "Tin2_HE1_raw":               int(s["Tin2"] * 10),
-            "Tout2_HE1_raw":              int(s["Tout2"] * 10),
+            "Tout1_PHE1_raw":              int(s["Tout1"] * 10),
+            "Tin2_PHE1_raw":               int(s["Tin2"] * 10),
+            "Tout2_PHE1_raw":              int(s["Tout2"] * 10),
             "F1":                         f1,
             "F1_SP":                      f1,
             "F1_skal":                    int(f1 * 100),
@@ -205,5 +205,5 @@ class OpenPipeConnector:
             "F2_skal":                    int(f2 * 100),
             "Valve_F2":                   2,
             "power":                      True,
-            "HeaterLarge_PWM":            s["PWM"],
+            "power_SP":            s["PWM"],
         }

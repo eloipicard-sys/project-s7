@@ -34,10 +34,10 @@ DB_NUMBER = int(os.getenv("PLC_DB", 1))
 # DB1.DBD60 = TiPI (Ti of inner PI, written by Docker after identification)
 OFFSET_PROCESS = 28
 _PROCESS_VARS  = [
-    (28, "Tin1_HE1"),
-    (32, "Tout1_HE1"),
-    (36, "Tin2_HE1"),
-    (40, "Tout2_HE1"),
+    (28, "Tin1_PHE1"),
+    (32, "Tout1_PHE1"),
+    (36, "Tin2_PHE1"),
+    (40, "Tout2_PHE1"),
     (44, "F1"),
     (48, "F2"),
     (52, "F1_SP"),
@@ -146,10 +146,10 @@ class PLCConnector:
         (28, "F1"),
         (32, "F2"),
         (36, "F2_SP"),
-        (40, "Tin2_HE1"),
-        (44, "Tout1_HE1"),
-        (48, "Tin1_HE1"),
-        (52, "Tout2_HE1"),
+        (40, "Tin2_PHE1"),
+        (44, "Tout1_PHE1"),
+        (48, "Tin1_PHE1"),
+        (52, "Tout2_PHE1"),
         (56, "pressure"),
     ]
     _MK_START = 12
