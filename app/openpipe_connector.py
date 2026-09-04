@@ -105,6 +105,24 @@ class OpenPipeConnector:
             except Exception as exc:
                 logger.error(f"Open Pipe read failed: {exc}")
 
+        # Repli Snap7 : hors du pupitre, le socket Open Pipe n'existe pas, mais
+        # l'automate reste joignable en TCP. Les valeurs simulées servent de
+        # base et les grandeurs réelles lues dans DB1 viennent les remplacer.
+        if self._plc is not None and self._plc.is_connected():
+            try:
+                real = self._plc.read_process_data()
+                data = self._simulated_values()
+                for k, v in real.items():
+                    if k in TAG_TYPES:
+                        data[k] = v
+                        raw = f"{k}_raw"
+                        if raw in TAG_TYPES:
+                            data[raw] = int(v * 10)
+                data["source"] = "SNAP7"
+                return data
+            except Exception as exc:
+                logger.error(f"Snap7 fallback read failed: {exc}")
+
         data = self._simulated_values()
         data["source"] = "SIMULATION"
         return data
