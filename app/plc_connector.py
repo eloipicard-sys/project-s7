@@ -45,6 +45,14 @@ _PROCESS_VARS  = [
     (60, "TiPI"),
 ]
 OFFSET_F1_SP = 52
+
+# DB1 s'arrête avant l'offset 64 sur l'automate du laboratoire (constaté le
+# 04/09/2026) : la lecture se limite aux sept variables de procédé, 28 octets
+# depuis l'offset 28. Les deux gains ci-dessous ne sont écrits que si le bloc
+# est étendu ; sans cela, push_params signale l'absence sans faire échouer
+# la campagne de mesures.
+PROCESS_SIZE = 28
+
 OFFSET_krPI  = 56
 OFFSET_TiPI  = 60
 
@@ -193,10 +201,12 @@ class PLCConnector:
             raise ConnectionError("PLC not connected")
 
         with self._lock:
-            raw = self.client.db_read(DB_NUMBER, OFFSET_PROCESS, 36)
+            raw = self.client.db_read(DB_NUMBER, OFFSET_PROCESS, PROCESS_SIZE)
 
         result = {}
         for offset, name in _PROCESS_VARS:
+            if offset - OFFSET_PROCESS + 4 > PROCESS_SIZE:
+                continue          # krPI / TiPI : hors du bloc tel qu'il existe
             result[name] = round(get_real(raw, offset - OFFSET_PROCESS), 3)
         return result
 
